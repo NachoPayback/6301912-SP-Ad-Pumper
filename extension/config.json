@@ -26,31 +26,31 @@
   
   "banners": {
     "enabled": true,
-    "baseUrl": "chrome-extension://banners",
+    "baseUrl": "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/banner-assets",
     "maxConcurrent": 2,
     "maxPerPage": 2,
     "types": [
       {
         "size": "300x250",
-        "file": "ad_300x250.png",
+        "url": "https://via.placeholder.com/300x250/0ea5e9/ffffff?text=SP+Banner+300x250",
         "chance": 0.35,
         "priority": 1
       },
       {
         "size": "728x90",
-        "file": "ad_728x90.png",
+        "url": "https://via.placeholder.com/728x90/0ea5e9/ffffff?text=SP+Banner+728x90",
         "chance": 0.30,
         "priority": 2
       },
       {
         "size": "160x600",
-        "file": "ad_160x600.png",
+        "url": "https://via.placeholder.com/160x600/0ea5e9/ffffff?text=SP+Banner+160x600",
         "chance": 0.25,
         "priority": 3
       },
       {
         "size": "320x50",
-        "file": "ad_320x50.png",
+        "url": "https://via.placeholder.com/320x50/0ea5e9/ffffff?text=SP+Banner+320x50",
         "chance": 0.10,
         "priority": 4
       }

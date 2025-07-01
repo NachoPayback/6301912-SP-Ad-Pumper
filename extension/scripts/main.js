@@ -464,71 +464,232 @@
             }
         }
 
-        createSingleBanner() {
-            const bannerTypes = [
-                { size: '300x250', file: 'ad_300x250.png' },
-                { size: '728x90', file: 'ad_728x90.png' },
-                { size: '160x600', file: 'ad_160x600.png' }
-            ];
+                async createSingleBanner() {
+            try {
+                // Fetch available banners from database
+                const banners = await this.supabase.apiCall('banners?enabled=eq.true&order=priority.asc');
+                if (!banners || banners.length === 0) {
+                    console.log('⚠️ No banners available in database');
+                    return;
+                }
+                
+                // Analyze page to find available placement zones
+                const availableZones = this.getAvailablePlacementZones();
+                
+                // Find best banner for available space
+                const selectedBanner = this.selectBannerForZones(banners, availableZones);
+                if (!selectedBanner) {
+                    console.log('⚠️ No suitable banner found for available UI zones');
+                    return;
+                }
+                
+                const [width, height] = selectedBanner.banner.size.split('x');
+                const zone = selectedBanner.zone;
+                
+                const bannerEl = document.createElement('div');
+                bannerEl.setAttribute('data-sp-banner', 'true');
+                bannerEl.style.cssText = `
+                    position: fixed; z-index: 999998;
+                    width: ${width}px; height: ${height}px;
+                    background: url('${selectedBanner.banner.image_url}') center/cover;
+                    border: 2px solid #ddd; border-radius: 8px;
+                    cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                `;
+                
+                // Position based on logical UI zone
+                this.positionBannerInZone(bannerEl, zone, width, height);
+                
+                bannerEl.onclick = () => {
+                    this.trackAdInteraction('banner', 'click', `${selectedBanner.banner.name}_${zone}`);
+                    window.open(selectedBanner.banner.target_url || 'https://www.youtube.com/c/ScammerPayback?sub_confirmation=1', '_blank');
+                };
+                
+                document.body.appendChild(bannerEl);
+                
+                // Track active banner
+                const bannerId = Date.now() + Math.random();
+                bannerEl.dataset.bannerId = bannerId;
+                bannerEl.dataset.zone = zone;
+                this.activeBanners.add(bannerId);
+                
+                console.log(`🎯 Placed banner: ${selectedBanner.banner.name} in ${zone} zone`);
+                this.trackAdInteraction('banner', 'view', `${selectedBanner.banner.name}_${zone}`);
+                
+                // Auto remove after 30 seconds
+                setTimeout(() => {
+                    if (bannerEl.parentNode) {
+                        bannerEl.remove();
+                        this.activeBanners.delete(bannerId);
+                    }
+                }, 30000);
+                
+            } catch (error) {
+                console.error('❌ Database banner error, using fallback:', error);
+                this.createFallbackBanner();
+            }
+        }
+
+        getAvailablePlacementZones() {
+            const zones = [];
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
             
-            const banner = bannerTypes[Math.floor(Math.random() * bannerTypes.length)];
-            const [width, height] = banner.size.split('x');
-            
-            const bannerEl = document.createElement('div');
-            bannerEl.setAttribute('data-sp-banner', 'true');
-            bannerEl.style.cssText = `
-                position: fixed; z-index: 999998;
-                width: ${width}px; height: ${height}px;
-                background: url('${chrome.runtime.getURL('assets/banners/' + banner.file)}') center/cover;
-                border: 2px solid #ddd; border-radius: 8px;
-                cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            `;
-            
-            // Random position
-            const positions = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
-            const position = positions[Math.floor(Math.random() * positions.length)];
-            
-            switch(position) {
-                case 'top-left':
-                    bannerEl.style.top = '20px';
-                    bannerEl.style.left = '20px';
-                    break;
-                case 'top-right':
-                    bannerEl.style.top = '20px';
-                    bannerEl.style.right = '20px';
-                    break;
-                case 'bottom-left':
-                    bannerEl.style.bottom = '20px';
-                    bannerEl.style.left = '20px';
-                    break;
-                case 'bottom-right':
-                    bannerEl.style.bottom = '20px';
-                    bannerEl.style.right = '20px';
-                    break;
+            // Check for sidebar space (desktop)
+            if (viewportWidth > 1200) {
+                zones.push('sidebar');
             }
             
-            bannerEl.onclick = () => {
-                this.trackAdInteraction('banner', 'click', position);
-                window.open('https://www.youtube.com/c/ScammerPayback?sub_confirmation=1', '_blank');
-            };
+            // Check for header space
+            if (viewportHeight > 600) {
+                zones.push('header');
+            }
             
-            document.body.appendChild(bannerEl);
+            // Check for footer space
+            zones.push('footer');
             
-            // Track active banner
-            const bannerId = Date.now() + Math.random();
-            bannerEl.dataset.bannerId = bannerId;
-            this.activeBanners.add(bannerId);
+            // Check for mobile zones
+            if (viewportWidth <= 768) {
+                zones.push('mobile-header', 'mobile-footer');
+            }
             
-            this.trackAdInteraction('banner', 'view', position);
+            // Check for content break zones (between paragraphs, etc.)
+            if (document.querySelectorAll('p, article, section').length > 3) {
+                zones.push('content-break');
+            }
             
-            // Auto remove after 30 seconds
-            setTimeout(() => {
-                if (bannerEl.parentNode) {
-                    bannerEl.remove();
-                    this.activeBanners.delete(bannerId);
-                }
-            }, 30000);
+            return zones;
         }
+
+        selectBannerForZones(banners, availableZones) {
+            // Find banners that can fit in available zones
+            for (const zone of availableZones) {
+                for (const banner of banners) {
+                    if (banner.placement_zones && banner.placement_zones.includes(zone)) {
+                        // Check if this zone is already occupied
+                        const existingBanners = document.querySelectorAll(`[data-sp-banner][data-zone="${zone}"]`);
+                        if (existingBanners.length === 0) {
+                            return { banner, zone };
+                        }
+                    }
+                }
+            }
+            
+            // Fallback: try any zone with highest priority banner
+            for (const banner of banners) {
+                for (const zone of availableZones) {
+                    if (banner.placement_zones && banner.placement_zones.includes(zone)) {
+                        return { banner, zone };
+                    }
+                }
+            }
+            
+            return null;
+        }
+
+        positionBannerInZone(bannerEl, zone, width, height) {
+            switch(zone) {
+                case 'sidebar':
+                    bannerEl.style.top = '20px';
+                    bannerEl.style.right = '20px';
+                    break;
+                case 'header':
+                    bannerEl.style.top = '20px';
+                    bannerEl.style.left = '50%';
+                    bannerEl.style.transform = 'translateX(-50%)';
+                    break;
+                case 'footer':
+                    bannerEl.style.bottom = '20px';
+                    bannerEl.style.left = '50%';
+                    bannerEl.style.transform = 'translateX(-50%)';
+                    break;
+                case 'mobile-header':
+                    bannerEl.style.top = '10px';
+                    bannerEl.style.left = '50%';
+                    bannerEl.style.transform = 'translateX(-50%)';
+                    break;
+                case 'mobile-footer':
+                    bannerEl.style.bottom = '10px';
+                    bannerEl.style.left = '50%';
+                    bannerEl.style.transform = 'translateX(-50%)';
+                    break;
+                case 'content-break':
+                    bannerEl.style.top = '50%';
+                    bannerEl.style.right = '20px';
+                    bannerEl.style.transform = 'translateY(-50%)';
+                    break;
+                default:
+                    // Fallback to bottom-right
+                    bannerEl.style.bottom = '20px';
+                    bannerEl.style.right = '20px';
+            }
+        }
+
+         createFallbackBanner() {
+             // Fallback to local files if database fails
+             const bannerTypes = [
+                 { size: '300x250', file: 'ad_300x250.png' },
+                 { size: '728x90', file: 'ad_728x90.png' },
+                 { size: '160x600', file: 'ad_160x600.png' }
+             ];
+             
+             const banner = bannerTypes[Math.floor(Math.random() * bannerTypes.length)];
+             const [width, height] = banner.size.split('x');
+             
+             const bannerEl = document.createElement('div');
+             bannerEl.setAttribute('data-sp-banner', 'true');
+             bannerEl.style.cssText = `
+                 position: fixed; z-index: 999998;
+                 width: ${width}px; height: ${height}px;
+                 background: url('${chrome.runtime.getURL('assets/banners/' + banner.file)}') center/cover;
+                 border: 2px solid #ddd; border-radius: 8px;
+                 cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+             `;
+             
+             // Random position
+             const positions = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+             const position = positions[Math.floor(Math.random() * positions.length)];
+             
+             switch(position) {
+                 case 'top-left':
+                     bannerEl.style.top = '20px';
+                     bannerEl.style.left = '20px';
+                     break;
+                 case 'top-right':
+                     bannerEl.style.top = '20px';
+                     bannerEl.style.right = '20px';
+                     break;
+                 case 'bottom-left':
+                     bannerEl.style.bottom = '20px';
+                     bannerEl.style.left = '20px';
+                     break;
+                 case 'bottom-right':
+                     bannerEl.style.bottom = '20px';
+                     bannerEl.style.right = '20px';
+                     break;
+             }
+             
+             bannerEl.onclick = () => {
+                 this.trackAdInteraction('banner', 'click', position);
+                 window.open('https://www.youtube.com/c/ScammerPayback?sub_confirmation=1', '_blank');
+             };
+             
+             document.body.appendChild(bannerEl);
+             
+             // Track active banner
+             const bannerId = Date.now() + Math.random();
+             bannerEl.dataset.bannerId = bannerId;
+             this.activeBanners.add(bannerId);
+             
+             this.trackAdInteraction('banner', 'view', `fallback_${position}`);
+             
+             // Auto remove after 30 seconds
+             setTimeout(() => {
+                 if (bannerEl.parentNode) {
+                     bannerEl.remove();
+                     this.activeBanners.delete(bannerId);
+                 }
+             }, 30000);
+         }
 
         rotateBanners() {
             // Remove old banners and create new ones
