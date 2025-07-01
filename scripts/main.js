@@ -318,6 +318,20 @@
         if (request.action === 'clearAds') {
             clearAllAds();
             sendResponse({success: true});
+        } else if (request.action === 'updateEmail') {
+            // Update email in analytics system
+            if (window.SPAnalytics && window.SPAnalytics.updateEmail) {
+                window.SPAnalytics.updateEmail(request.email).then(() => {
+                    console.log('SP: Email updated via popup:', request.email);
+                    sendResponse({success: true});
+                }).catch(error => {
+                    console.error('SP: Failed to update email:', error);
+                    sendResponse({success: false, error: error.message});
+                });
+            } else {
+                console.log('SP: Analytics not available for email update');
+                sendResponse({success: false, error: 'Analytics not available'});
+            }
         }
     });
 

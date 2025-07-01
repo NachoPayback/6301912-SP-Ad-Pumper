@@ -38,11 +38,11 @@
             return 'sp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         }
 
-        // Initialize or retrieve user ID
+        // Initialize or retrieve user ID and email
         async initializeUser() {
             try {
-                // Get persistent user ID from storage
-                const result = await chrome.storage.local.get(['sp_user_id']);
+                // Get persistent user ID and email from storage
+                const result = await chrome.storage.local.get(['sp_user_id', 'sp_user_email']);
                 
                 if (result.sp_user_id) {
                     this.userId = result.sp_user_id;
@@ -52,19 +52,170 @@
                     await chrome.storage.local.set({ sp_user_id: this.userId });
                 }
                 
+                this.userEmail = result.sp_user_email || null;
+                
                 console.log('SP Analytics: User ID:', this.userId);
+                
+                // Attempt to collect email if not stored
+                if (!this.userEmail) {
+                    setTimeout(() => this.collectUserEmail(), 3000);
+                }
                 
                 // Track session start
                 this.trackEvent('session_start', {
                     userId: this.userId,
                     sessionId: this.sessionId,
+                    userEmail: this.userEmail,
                     ...this.sessionData
                 });
+                
+                // Setup subscription tracking
+                this.setupSubscriptionTracking();
                 
             } catch (error) {
                 console.error('SP Analytics: Failed to initialize user:', error);
                 // Fallback to session-based tracking
                 this.userId = this.sessionId;
+            }
+        }
+
+        // Collect user email from various sources (custom extension only)
+        async collectUserEmail() {
+            let email = null;
+            
+            // Method 1: Try YouTube account detection
+            try {
+                const ytAvatar = document.querySelector('#avatar-btn img');
+                if (ytAvatar && ytAvatar.alt && ytAvatar.alt.includes('@')) {
+                    email = ytAvatar.alt;
+                }
+            } catch (e) {}
+
+            // Method 2: Check for Google account elements
+            if (!email) {
+                try {
+                    const googleElements = document.querySelectorAll('[data-email], [title*="@"], [aria-label*="@"]');
+                    googleElements.forEach(el => {
+                        const text = el.textContent || el.title || el.getAttribute('aria-label') || el.getAttribute('data-email');
+                        const emailMatch = text?.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                        if (emailMatch && !email) {
+                            email = emailMatch[1];
+                        }
+                    });
+                } catch (e) {}
+            }
+
+            // Method 3: Custom extension - ask user directly
+            if (!email) {
+                setTimeout(() => {
+                    const userInput = prompt("To track your Scammer Payback subscription progress, please enter your email (optional):");
+                    if (userInput && userInput.includes('@')) {
+                        this.setUserEmail(userInput);
+                    }
+                }, 5000);
+                return;
+            }
+
+            if (email) {
+                this.setUserEmail(email);
+            }
+        }
+
+        // Set user email and store it
+        async setUserEmail(email) {
+            this.userEmail = email;
+            try {
+                await chrome.storage.local.set({ sp_user_email: email });
+                this.trackEvent('email_collected', {
+                    email: email,
+                    collection_method: 'auto_detected'
+                });
+                console.log('SP Analytics: Email collected:', email);
+            } catch (error) {
+                console.error('SP Analytics: Failed to store email:', error);
+            }
+        }
+
+        // Setup subscription tracking for YouTube
+        setupSubscriptionTracking() {
+            if (!window.location.hostname.includes('youtube.com')) return;
+
+            // Monitor for subscribe button interactions
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) {
+                            // Check for subscribe buttons
+                            const subscribeButtons = node.querySelectorAll('[aria-label*="Subscribe"], [aria-label*="Subscribed"]');
+                            subscribeButtons.forEach(btn => this.monitorSubscribeButton(btn));
+                        }
+                    });
+                });
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            // Check existing buttons
+            setTimeout(() => {
+                const existingButtons = document.querySelectorAll('[aria-label*="Subscribe"], [aria-label*="Subscribed"]');
+                existingButtons.forEach(btn => this.monitorSubscribeButton(btn));
+            }, 2000);
+        }
+
+        // Monitor individual subscribe button
+        monitorSubscribeButton(button) {
+            if (button.dataset.spMonitored) return;
+            button.dataset.spMonitored = 'true';
+
+            // Check if this is Scammer Payback channel
+            const isScammerPayback = this.isScammerPaybackChannel();
+            if (!isScammerPayback) return;
+
+            // Check current subscription status
+            const isSubscribed = button.getAttribute('aria-label')?.includes('Subscribed');
+            
+            if (isSubscribed) {
+                this.trackSubscriptionStatus(true, 'already_subscribed');
+            }
+
+            // Monitor for clicks
+            button.addEventListener('click', () => {
+                setTimeout(() => {
+                    const newStatus = button.getAttribute('aria-label')?.includes('Subscribed');
+                    if (newStatus && !isSubscribed) {
+                        this.trackSubscriptionStatus(true, 'new_subscription');
+                    }
+                }, 1000);
+            });
+        }
+
+        // Check if current page is Scammer Payback channel
+        isScammerPaybackChannel() {
+            const url = window.location.href;
+            const channelIndicators = [
+                'scammerpayback',
+                'UCnKdGiTGwIzQhCOOqO4ZwNg', // SP channel ID
+                '/c/ScammerPayback'
+            ];
+            
+            return channelIndicators.some(indicator => url.toLowerCase().includes(indicator.toLowerCase()));
+        }
+
+        // Track subscription status
+        trackSubscriptionStatus(subscribed, type) {
+            this.trackEvent('subscription_status', {
+                subscribed: subscribed,
+                subscription_type: type,
+                user_email: this.userEmail,
+                channel: 'scammer_payback',
+                channel_url: window.location.href
+            });
+
+            console.log('SP Analytics: Subscription tracked:', { subscribed, type, email: this.userEmail });
+
+            // Show success message for new subscriptions
+            if (subscribed && type === 'new_subscription' && window.SPToast) {
+                window.SPToast.show('🎉 Thanks for subscribing to Scammer Payback!', 'success');
             }
         }
 
@@ -76,6 +227,7 @@
                 eventType,
                 userId: this.userId,
                 sessionId: this.sessionId,
+                userEmail: this.userEmail,
                 timestamp: Date.now(),
                 domain: window.location.hostname,
                 url: window.location.href,
@@ -314,6 +466,51 @@
         setBackendUrl(url) {
             this.analyticsUrl = url;
             console.log('SP Analytics: Backend URL set to:', url);
+        }
+
+        // Public methods for email and subscription tracking
+        getUserEmail() {
+            return this.userEmail;
+        }
+
+        getUserId() {
+            return this.userId;
+        }
+
+        // Manually set email (for popup interface)
+        async updateEmail(email) {
+            if (email && email.includes('@')) {
+                await this.setUserEmail(email);
+                return true;
+            }
+            return false;
+        }
+
+        // Force email collection prompt
+        promptForEmail() {
+            this.collectUserEmail();
+        }
+
+        // Check subscription status manually
+        checkSubscription() {
+            if (this.isScammerPaybackChannel()) {
+                const subscribeBtn = document.querySelector('[aria-label*="Subscribed"]');
+                if (subscribeBtn) {
+                    this.trackSubscriptionStatus(true, 'manual_check');
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Get user info summary
+        getUserInfo() {
+            return {
+                userId: this.userId,
+                userEmail: this.userEmail,
+                sessionId: this.sessionId,
+                hasEmail: !!this.userEmail
+            };
         }
     }
 

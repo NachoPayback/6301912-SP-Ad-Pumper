@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const toggleButton = document.getElementById('toggle');
     const clearButton = document.getElementById('clearAds');
     const prerollToggle = document.getElementById('prerollToggle');
+    const userEmailInput = document.getElementById('userEmail');
+    const emailStatus = document.getElementById('emailStatus');
 
     // Load current settings
     chrome.storage.sync.get(['enabled', 'showProbability', 'bannerDisplayTime', 'cooldownTime', 'extensionEnabled', 'prerollEnabled'], function(result) {
@@ -30,6 +32,28 @@ document.addEventListener('DOMContentLoaded', function() {
             prerollToggle.checked = prerollEnabled;
         }
     });
+
+    // Load email from storage
+    loadUserEmail();
+
+    // Email functionality
+    if (userEmailInput) {
+        userEmailInput.addEventListener('input', function() {
+            const email = userEmailInput.value.trim();
+            if (email && email.includes('@')) {
+                saveUserEmail(email);
+            }
+        });
+        
+        userEmailInput.addEventListener('blur', function() {
+            const email = userEmailInput.value.trim();
+            if (email && email.includes('@')) {
+                saveUserEmail(email);
+            } else if (email && !email.includes('@')) {
+                updateEmailStatus('Please enter a valid email address', 'error');
+            }
+        });
+    }
 
     // Update display values
     function updateDisplayValues() {
@@ -164,6 +188,43 @@ document.addEventListener('DOMContentLoaded', function() {
         if (toggleButton) {
             toggleButton.textContent = isEnabled ? 'Disable Extension' : 'Enable Extension';
             toggleButton.className = isEnabled ? 'button danger' : 'button primary';
+        }
+    }
+
+    // Email management functions
+    function loadUserEmail() {
+        chrome.storage.local.get(['sp_user_email'], function(result) {
+            if (result.sp_user_email && userEmailInput) {
+                userEmailInput.value = result.sp_user_email;
+                updateEmailStatus('✓ Email saved for subscription tracking', 'success');
+            }
+        });
+    }
+
+    function saveUserEmail(email) {
+        chrome.storage.local.set({sp_user_email: email}, function() {
+            updateEmailStatus('✓ Email saved for subscription tracking', 'success');
+            
+            // Send to analytics system if available
+            chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+                if (tabs[0] && tabs[0].id) {
+                    chrome.tabs.sendMessage(tabs[0].id, {
+                        action: 'updateEmail',
+                        email: email
+                    }, function(response) {
+                        if (chrome.runtime.lastError) {
+                            console.log('Could not update email in content script');
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    function updateEmailStatus(message, type) {
+        if (emailStatus) {
+            emailStatus.textContent = message;
+            emailStatus.className = 'email-status ' + type;
         }
     }
 
