@@ -37,7 +37,8 @@
       "resources": [
         "assets/*",
         "styles/*",
-        "scripts/core/*"
+        "scripts/core/*",
+        "config.json"
       ],
       "matches": ["http://*/*", "https://*/*"]
     }

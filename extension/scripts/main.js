@@ -9,7 +9,6 @@
 
     class SPExtension {
         constructor() {
-            this.configUrl = 'https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/config.json';
             this.config = {};
             this.supabase = null;
             this.currentUser = null;
@@ -41,9 +40,6 @@
                 
                 // Start ad systems
                 this.startAdSystems();
-                
-                // Regular config updates
-                setInterval(() => this.loadConfig(), 30000);
                 
             } catch (error) {
                 console.error('❌ Extension init failed:', error);
@@ -186,7 +182,8 @@
 
         async loadConfig() {
             try {
-                const response = await fetch(this.configUrl + '?t=' + Date.now());
+                // Load local config file (Chrome extensions can't fetch external URLs due to CSP)
+                const response = await fetch(chrome.runtime.getURL('config.json'));
                 this.config = await response.json();
                 
                 // Emergency disable check
@@ -196,7 +193,7 @@
                     return;
                 }
                 
-                console.log('📁 Config loaded');
+                console.log('📁 Local config loaded successfully');
                 
             } catch (error) {
                 console.error('❌ Config load failed:', error);
@@ -204,8 +201,8 @@
                 this.config = {
                     features: { preroll: true, banners: true, toast: true },
                     preroll: { enabled: true, videoId: "YV0NfxtK0n0", chance: 0.3 },
-                    banners: { enabled: true, maxPerPage: 2 },
-                    toast: { enabled: true, maxPerSession: 1 }
+                    banners: { enabled: true, maxConcurrent: 2 },
+                    toast: { enabled: true, maxConcurrent: 1 }
                 };
             }
         }
