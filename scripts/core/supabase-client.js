@@ -1,176 +1,306 @@
-// Supabase client for Chrome extension
+// Supabase Client for SP Extension Analytics
+// Real-time user tracking and ad interaction analytics
+
 class SupabaseClient {
     constructor() {
-        this.url = 'https://ahwfkfowqrjgatsbynds.supabase.co';
-        this.key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFod2ZrZm93cXJqZ2F0c2J5bmRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzODg0MTAsImV4cCI6MjA2Njk2NDQxMH0.hRTJESyHmSIc7gUqROqkask8ZOHEqjNfzo0u-8GaIhQ';
-        this.currentUserId = null;
-        this.currentSessionId = null;
+        // Real Supabase configuration - Like-Subscribe-Analytics project
+        this.supabaseUrl = 'https://ahwfkfowqrjgatsbynds.supabase.co';
+        this.supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFod2ZrZm93cXJqZ2F0c2J5bmRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzODg0MTAsImV4cCI6MjA2Njk2NDQxMH0.hRTJESyHmSIc7gUqROqkask8ZOHEqjNfzo0u-8GaIhQ';
+        
+        this.client = null;
+        this.currentUser = null;
+        this.currentSession = null;
+        
+        this.init();
     }
 
-    // Make HTTP requests to Supabase REST API
-    async request(path, options = {}) {
-        const url = `${this.url}/rest/v1${path}`;
-        const headers = {
-            'apikey': this.key,
-            'Authorization': `Bearer ${this.key}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation',
-            ...options.headers
-        };
-
+    async init() {
         try {
-            const response = await fetch(url, {
-                ...options,
-                headers
-            });
-
-            if (!response.ok) {
-                throw new Error(`Supabase error: ${response.status} ${response.statusText}`);
+            // Load Supabase library if not already loaded
+            if (typeof window.supabase === 'undefined') {
+                await this.loadSupabaseLibrary();
             }
-
-            return await response.json();
+            
+            this.client = window.supabase.createClient(this.supabaseUrl, this.supabaseKey);
+            console.log('✅ Connected to Supabase database');
+            
         } catch (error) {
-            console.error('Supabase request failed:', error);
-            throw error;
+            console.error('❌ Failed to initialize Supabase:', error);
         }
     }
 
-    // Create or update user
-    async upsertUser(userData) {
-        try {
-            const response = await this.request('/users', {
-                method: 'POST',
-                body: JSON.stringify({
-                    email: userData.email,
-                    real_name: userData.realName,
-                    location: userData.location,
-                    browser_info: userData.browserInfo,
-                    last_seen: new Date().toISOString(),
-                    total_sessions: 0
-                }),
-                headers: {
-                    'Prefer': 'resolution=merge-duplicates'
-                }
-            });
+    async loadSupabaseLibrary() {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/@supabase/supabase-js@2';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
 
-            if (response && response.length > 0) {
-                this.currentUserId = response[0].id;
-                await this.ensureUserSettings(this.currentUserId);
-                return response[0];
+    // Create or get user record
+    async getOrCreateUser(email, browserInfo) {
+        if (!this.client) await this.init();
+        
+        try {
+            // Try to find existing user by email
+            let { data: existingUser, error } = await this.client
+                .from('users')
+                .select('*')
+                .eq('email', email)
+                .single();
+
+            if (existingUser) {
+                // Update last_seen and session count
+                const { data: updatedUser } = await this.client
+                    .from('users')
+                    .update({ 
+                        last_seen: new Date().toISOString(),
+                        total_sessions: existingUser.total_sessions + 1,
+                        browser_info: browserInfo
+                    })
+                    .eq('id', existingUser.id)
+                    .select()
+                    .single();
+                
+                this.currentUser = updatedUser || existingUser;
+                console.log('📱 Existing user found:', this.currentUser.email);
+            } else {
+                // Create new user
+                const { data: newUser, error: createError } = await this.client
+                    .from('users')
+                    .insert({
+                        email: email,
+                        browser_info: browserInfo,
+                        location: await this.getUserLocation(),
+                        total_sessions: 1
+                    })
+                    .select()
+                    .single();
+
+                if (createError) throw createError;
+                
+                this.currentUser = newUser;
+                console.log('🆕 New user created:', this.currentUser.email);
+                
+                // Create default user settings
+                await this.createDefaultUserSettings(newUser.id);
             }
+            
+            return this.currentUser;
+            
         } catch (error) {
-            console.error('Failed to upsert user:', error);
+            console.error('❌ Error managing user:', error);
             return null;
         }
     }
 
-    // Ensure user has settings record
-    async ensureUserSettings(userId) {
+    async createDefaultUserSettings(userId) {
         try {
-            const existing = await this.request(`/user_settings?user_id=eq.${userId}`);
-            
-            if (!existing || existing.length === 0) {
-                await this.request('/user_settings', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        user_id: userId,
-                        slot_mode: 'normal',
-                        banners_per_page: 2,
-                        toasts_per_session: 1,
-                        preroll_enabled: true,
-                        stealth_mode: false
-                    })
+            await this.client
+                .from('user_settings')
+                .insert({
+                    user_id: userId,
+                    slot_mode: 'normal',
+                    banners_per_page: 2,
+                    toasts_per_session: 1,
+                    preroll_enabled: true,
+                    stealth_mode: false
                 });
-            }
+            
+            console.log('⚙️ Default settings created for user');
         } catch (error) {
-            console.error('Failed to ensure user settings:', error);
+            console.error('❌ Error creating user settings:', error);
         }
     }
 
-    // Start a new session
-    async startSession(userId) {
+    // Get user-specific ad settings
+    async getUserSettings(userId) {
+        if (!this.client) return null;
+        
         try {
-            const response = await this.request('/user_sessions', {
-                method: 'POST',
-                body: JSON.stringify({
+            const { data, error } = await this.client
+                .from('user_settings')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+
+            if (error) throw error;
+            return data;
+            
+        } catch (error) {
+            console.error('❌ Error getting user settings:', error);
+            return null;
+        }
+    }
+
+    // Update user settings (for per-user ad control)
+    async updateUserSettings(userId, settings) {
+        if (!this.client) return false;
+        
+        try {
+            const { error } = await this.client
+                .from('user_settings')
+                .update({
+                    ...settings,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('user_id', userId);
+
+            if (error) throw error;
+            console.log('⚙️ User settings updated');
+            return true;
+            
+        } catch (error) {
+            console.error('❌ Error updating user settings:', error);
+            return false;
+        }
+    }
+
+    // Start new session
+    async startSession(userId) {
+        if (!this.client || !userId) return;
+        
+        try {
+            const { data, error } = await this.client
+                .from('user_sessions')
+                .insert({
                     user_id: userId,
                     session_start: new Date().toISOString(),
-                    pages_visited: 0,
+                    pages_visited: 1,
                     sites_visited: [window.location.hostname]
                 })
-            });
+                .select()
+                .single();
 
-            if (response && response.length > 0) {
-                this.currentSessionId = response[0].id;
-                return response[0];
-            }
+            if (error) throw error;
+            
+            this.currentSession = data;
+            console.log('🚀 Session started:', this.currentSession.id);
+            return this.currentSession;
+            
         } catch (error) {
-            console.error('Failed to start session:', error);
-            return null;
-        }
-    }
-
-    // Update session
-    async updateSession(sessionId, updates) {
-        try {
-            await this.request(`/user_sessions?id=eq.${sessionId}`, {
-                method: 'PATCH',
-                body: JSON.stringify(updates)
-            });
-        } catch (error) {
-            console.error('Failed to update session:', error);
+            console.error('❌ Error starting session:', error);
         }
     }
 
     // Track ad interaction
     async trackAdInteraction(adType, interactionType, adPosition = null) {
-        if (!this.currentUserId || !this.currentSessionId) {
-            console.warn('No active user/session for ad tracking');
-            return;
-        }
-
+        if (!this.client || !this.currentUser || !this.currentSession) return;
+        
         try {
-            await this.request('/ad_interactions', {
-                method: 'POST',
-                body: JSON.stringify({
-                    user_id: this.currentUserId,
-                    session_id: this.currentSessionId,
+            await this.client
+                .from('ad_interactions')
+                .insert({
+                    user_id: this.currentUser.id,
+                    session_id: this.currentSession.id,
                     ad_type: adType,
                     ad_position: adPosition,
                     interaction_type: interactionType,
                     site_domain: window.location.hostname,
-                    page_url: window.location.href,
-                    timestamp: new Date().toISOString()
-                })
-            });
+                    page_url: window.location.href
+                });
+
+            console.log(`📊 Tracked ${adType} ${interactionType} on ${window.location.hostname}`);
+            
         } catch (error) {
-            console.error('Failed to track ad interaction:', error);
+            console.error('❌ Error tracking ad interaction:', error);
         }
     }
 
-    // Get user settings
-    async getUserSettings(userId) {
+    // Get user location (for targeting)
+    async getUserLocation() {
         try {
-            const response = await this.request(`/user_settings?user_id=eq.${userId}`);
-            return response && response.length > 0 ? response[0] : null;
+            const response = await fetch('https://ipapi.co/json/');
+            const location = await response.json();
+            return {
+                country: location.country_name,
+                region: location.region,
+                city: location.city,
+                timezone: location.timezone
+            };
         } catch (error) {
-            console.error('Failed to get user settings:', error);
-            return null;
+            return { country: 'Unknown', region: 'Unknown', city: 'Unknown' };
         }
     }
 
-    // Update user settings
-    async updateUserSettings(userId, settings) {
+    // Get active users (for dashboard)
+    async getActiveUsers(hours = 24) {
+        if (!this.client) return [];
+        
         try {
-            await this.request(`/user_settings?user_id=eq.${userId}`, {
-                method: 'PATCH',
-                body: JSON.stringify(settings)
-            });
+            const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+            
+            const { data, error } = await this.client
+                .from('users')
+                .select(`
+                    *,
+                    user_settings (*),
+                    user_sessions!inner (session_start, session_end, pages_visited),
+                    ad_interactions (ad_type, interaction_type)
+                `)
+                .gte('last_seen', since)
+                .order('last_seen', { ascending: false });
+
+            if (error) throw error;
+            return data;
+            
         } catch (error) {
-            console.error('Failed to update user settings:', error);
+            console.error('❌ Error getting active users:', error);
+            return [];
+        }
+    }
+
+    // Get ad interaction stats
+    async getAdStats(userId = null, days = 7) {
+        if (!this.client) return {};
+        
+        try {
+            const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+            
+            let query = this.client
+                .from('ad_interactions')
+                .select('ad_type, interaction_type, timestamp')
+                .gte('timestamp', since);
+                
+            if (userId) {
+                query = query.eq('user_id', userId);
+            }
+            
+            const { data, error } = await query;
+            if (error) throw error;
+            
+            // Process stats
+            const stats = {
+                total_views: 0,
+                total_clicks: 0,
+                by_ad_type: {},
+                by_day: {}
+            };
+            
+            data.forEach(interaction => {
+                if (interaction.interaction_type === 'view') stats.total_views++;
+                if (interaction.interaction_type === 'click') stats.total_clicks++;
+                
+                if (!stats.by_ad_type[interaction.ad_type]) {
+                    stats.by_ad_type[interaction.ad_type] = { views: 0, clicks: 0 };
+                }
+                stats.by_ad_type[interaction.ad_type][interaction.interaction_type + 's']++;
+                
+                const day = interaction.timestamp.split('T')[0];
+                if (!stats.by_day[day]) stats.by_day[day] = 0;
+                stats.by_day[day]++;
+            });
+            
+            return stats;
+            
+        } catch (error) {
+            console.error('❌ Error getting ad stats:', error);
+            return {};
         }
     }
 }
 
-// Export for use in other scripts
+// Make it globally available
 window.SupabaseClient = SupabaseClient; 

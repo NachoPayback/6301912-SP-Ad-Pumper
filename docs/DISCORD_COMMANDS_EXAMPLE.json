@@ -1,0 +1,41 @@
+{
+  "timestamp": 1672531200000,
+  "commands": [
+    {
+      "action": "test_connection",
+      "params": {}
+    },
+    {
+      "action": "get_analytics_summary",
+      "params": {
+        "timeframe": "24h"
+      }
+    },
+    {
+      "action": "get_user_stats",
+      "params": {
+        "userId": "user_abc123_def456"
+      }
+    },
+    {
+      "action": "update_user_settings",
+      "params": {
+        "userId": "user_abc123_def456",
+        "settings": {
+          "slot_mode": "aggressive",
+          "banners_per_page": 5,
+          "toasts_per_session": 3,
+          "preroll_enabled": true
+        }
+      }
+    },
+    {
+      "action": "get_active_users",
+      "params": {}
+    },
+    {
+      "action": "emergency_disable",
+      "params": {}
+    }
+  ]
+} 

@@ -1,9 +1,14 @@
 // SP Extension Dashboard Configuration
-// Set these environment variables in Vercel or uncomment and set manually
+// Real Supabase database connection
 
-// window.DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN';
-// window.GITHUB_CONFIG_URL = 'https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/config.json';
-// window.DATA_ENDPOINT = 'https://your-api-endpoint.com/api';
+window.SUPABASE_URL = 'https://ahwfkfowqrjgatsbynds.supabase.co';
+window.SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFod2ZrZm93cXJqZ2F0c2J5bmRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzODg0MTAsImV4cCI6MjA2Njk2NDQxMH0.hRTJESyHmSIc7gUqROqkask8ZOHEqjNfzo0u-8GaIhQ';
+
+// GitHub config URL for live updates
+window.GITHUB_CONFIG_URL = 'https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/config.json';
+
+// Optional Discord webhook for commands (set if you want Discord integration)
+window.DISCORD_WEBHOOK_URL = null; // Set this if you want Discord notifications
 
 // Dashboard Configuration
 // Connects to Supabase for real-time data
@@ -11,8 +16,8 @@
 window.DASHBOARD_CONFIG = {
     // Supabase Configuration
     supabase: {
-        url: 'https://ahwfkfowqrjgatsbynds.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFod2ZrZm93cXJqZ2F0c2J5bmRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzUyMTk4OTEsImV4cCI6MjA1MDc5NTg5MX0.3q0NF2u-EmdMdlxMjPuJKy_LjY5L_bTJb8A7KGOV5jM',
+        url: window.SUPABASE_URL,
+        anonKey: window.SUPABASE_ANON_KEY,
         projectId: 'ahwfkfowqrjgatsbynds'
     },
     
@@ -247,4 +252,4 @@ class DashboardSupabase {
 // Initialize Supabase client
 window.dashboardSupabase = new DashboardSupabase(window.DASHBOARD_CONFIG.supabase);
 
-console.log('📊 Dashboard configuration loaded'); 
+console.log('✅ Dashboard config loaded - Connected to real Supabase database'); 
