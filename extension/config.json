@@ -26,37 +26,11 @@
   
   "banners": {
     "enabled": true,
-    "baseUrl": "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/banner-assets",
     "maxConcurrent": 2,
     "maxPerPage": 2,
-    "types": [
-      {
-        "size": "300x250",
-        "url": "https://via.placeholder.com/300x250/0ea5e9/ffffff?text=SP+Banner+300x250",
-        "chance": 0.35,
-        "priority": 1
-      },
-      {
-        "size": "728x90",
-        "url": "https://via.placeholder.com/728x90/0ea5e9/ffffff?text=SP+Banner+728x90",
-        "chance": 0.30,
-        "priority": 2
-      },
-      {
-        "size": "160x600",
-        "url": "https://via.placeholder.com/160x600/0ea5e9/ffffff?text=SP+Banner+160x600",
-        "chance": 0.25,
-        "priority": 3
-      },
-      {
-        "size": "320x50",
-        "url": "https://via.placeholder.com/320x50/0ea5e9/ffffff?text=SP+Banner+320x50",
-        "chance": 0.10,
-        "priority": 4
-      }
-    ],
     "rotationTime": 45000,
-    "fadeTransition": true
+    "fadeTransition": true,
+    "note": "Banner configs now loaded from Supabase database with GitHub hosting"
   },
   
   "toast": {
