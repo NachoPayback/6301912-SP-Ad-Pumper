@@ -100,6 +100,13 @@
         // Initialize or retrieve user ID and email, create Supabase user
         async initializeUser() {
             try {
+                // Check if we're in Chrome extension context
+                if (typeof chrome === 'undefined' || !chrome.storage) {
+                    console.log('SP Analytics: Not in Chrome extension context, using fallback initialization');
+                    await this.initializeFallbackUser();
+                    return;
+                }
+                
                 // Get persistent user data from storage
                 const result = await chrome.storage.local.get(['sp_user_id', 'sp_user_email', 'sp_real_name']);
                 
@@ -114,7 +121,9 @@
                     console.log('SP Analytics: User initialized in Supabase:', this.userId);
                     
                     // Store user ID locally for future use
-                    await chrome.storage.local.set({ sp_user_id: this.userId });
+                    if (typeof chrome !== 'undefined' && chrome.storage) {
+                        await chrome.storage.local.set({ sp_user_id: this.userId });
+                    }
                     
                     // Start new session in Supabase
                     await this.supabase.startSession(this.userId);
@@ -134,6 +143,49 @@
                 console.error('SP Analytics: Failed to initialize user:', error);
                 // Fallback to local tracking only
                 this.userId = 'local_' + Date.now();
+                this.enabled = false;
+            }
+        }
+
+        // Fallback initialization for non-extension contexts
+        async initializeFallbackUser() {
+            try {
+                // Get stored data from localStorage instead of chrome.storage
+                const storedUserId = localStorage.getItem('sp_user_id');
+                const storedEmail = localStorage.getItem('sp_user_email');
+                const storedName = localStorage.getItem('sp_real_name');
+                
+                const storedData = {
+                    sp_user_id: storedUserId,
+                    sp_user_email: storedEmail,
+                    sp_real_name: storedName
+                };
+                
+                // Collect user data
+                const userData = await this.collectUserData(storedData);
+                
+                // Create or update user in Supabase
+                this.currentUser = await this.supabase.upsertUser(userData);
+                
+                if (this.currentUser) {
+                    this.userId = this.currentUser.id;
+                    console.log('SP Analytics: Fallback user initialized in Supabase:', this.userId);
+                    
+                    // Store user ID in localStorage
+                    localStorage.setItem('sp_user_id', this.userId);
+                    
+                    // Start new session in Supabase
+                    await this.supabase.startSession(this.userId);
+                    
+                    // Setup subscription tracking
+                    this.setupSubscriptionTracking();
+                } else {
+                    throw new Error('Failed to create user in Supabase');
+                }
+                
+            } catch (error) {
+                console.error('SP Analytics: Fallback initialization failed:', error);
+                this.userId = 'fallback_' + Date.now();
                 this.enabled = false;
             }
         }
@@ -296,8 +348,12 @@
         async setUserEmail(email) {
             this.userEmail = email;
             try {
-                // Save to local storage
-                await chrome.storage.local.set({ sp_user_email: email });
+                // Save to local storage (Chrome extension or fallback localStorage)
+                if (typeof chrome !== 'undefined' && chrome.storage) {
+                    await chrome.storage.local.set({ sp_user_email: email });
+                } else {
+                    localStorage.setItem('sp_user_email', email);
+                }
                 
                 // Update Supabase user record if we have a current user
                 if (this.currentUser && this.supabase) {
@@ -625,6 +681,17 @@
         // Store events locally for backup/retry
         async storeEventsLocally(events) {
             try {
+                // Check if we're in Chrome extension context
+                if (typeof chrome === 'undefined' || !chrome.storage) {
+                    // Use localStorage as fallback
+                    const key = `sp_analytics_${Date.now()}`;
+                    localStorage.setItem(key, JSON.stringify(events));
+                    
+                    // Clean up old localStorage entries
+                    this.cleanupLocalStorageEvents();
+                    return;
+                }
+                
                 const key = `sp_analytics_${Date.now()}`;
                 await chrome.storage.local.set({ [key]: events });
                 
@@ -646,14 +713,48 @@
             }
         }
 
+        // Cleanup localStorage events (fallback storage)
+        cleanupLocalStorageEvents() {
+            try {
+                const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+                const keysToRemove = [];
+                
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('sp_analytics_')) {
+                        const timestamp = parseInt(key.split('_')[2]);
+                        if (timestamp < sevenDaysAgo) {
+                            keysToRemove.push(key);
+                        }
+                    }
+                }
+                
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+            } catch (error) {
+                console.error('Failed to cleanup localStorage events:', error);
+            }
+        }
+
         // Get analytics summary for popup
         async getAnalyticsSummary() {
             try {
-                const result = await chrome.storage.local.get([
-                    'sp_total_impressions',
-                    'sp_total_clicks',
-                    'sp_session_count'
-                ]);
+                let result;
+                
+                // Check if we're in Chrome extension context
+                if (typeof chrome === 'undefined' || !chrome.storage) {
+                    // Use localStorage as fallback
+                    result = {
+                        sp_total_impressions: parseInt(localStorage.getItem('sp_total_impressions')) || 0,
+                        sp_total_clicks: parseInt(localStorage.getItem('sp_total_clicks')) || 0,
+                        sp_session_count: parseInt(localStorage.getItem('sp_session_count')) || 0
+                    };
+                } else {
+                    result = await chrome.storage.local.get([
+                        'sp_total_impressions',
+                        'sp_total_clicks',
+                        'sp_session_count'
+                    ]);
+                }
 
                 return {
                     totalImpressions: result.sp_total_impressions || 0,
@@ -672,9 +773,18 @@
         async updateCounters(type) {
             try {
                 const key = `sp_total_${type}`;
-                const result = await chrome.storage.local.get([key]);
-                const newCount = (result[key] || 0) + 1;
-                await chrome.storage.local.set({ [key]: newCount });
+                
+                // Check if we're in Chrome extension context
+                if (typeof chrome === 'undefined' || !chrome.storage) {
+                    // Use localStorage as fallback
+                    const currentCount = parseInt(localStorage.getItem(key)) || 0;
+                    const newCount = currentCount + 1;
+                    localStorage.setItem(key, newCount.toString());
+                } else {
+                    const result = await chrome.storage.local.get([key]);
+                    const newCount = (result[key] || 0) + 1;
+                    await chrome.storage.local.set({ [key]: newCount });
+                }
             } catch (error) {
                 console.error('SP Analytics: Failed to update counters:', error);
             }
