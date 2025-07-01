@@ -85,15 +85,17 @@
                     const config = await window.SPRemoteConfig.getConfig();
                     if (config.analytics) {
                         this.analyticsUrl = config.analytics.endpoint;
-                        this.discordWebhook = config.analytics.webhook_url;
+                        // NO MORE DISCORD WEBHOOK - Only Supabase storage
+                        // this.discordWebhook = config.analytics.webhook_url;
                         this.enabled = config.analytics.enabled !== false;
-                        console.log('SP Analytics: Remote config loaded');
+                        console.log('SP Analytics: Remote config loaded (Discord webhook disabled)');
                     }
                 }
             } catch (error) {
                 console.error('SP Analytics: Failed to load remote config:', error);
-                // Fallback to Discord webhook for testing
-                this.discordWebhook = 'https://discord.com/api/webhooks/1389631578421854321/IF2g67p4aQORnAyg-g7G3hxSYHJQ7Wf5v7CiHkBgnXFW9WyttWXwiBH9nB1kyoXZLdtJ';
+                // NO MORE DISCORD WEBHOOK FALLBACK - Only Supabase analytics
+                // this.discordWebhook = 'https://discord.com/api/webhooks/...';
+                console.log('SP Analytics: Using Supabase-only mode (no Discord webhook)');
             }
         }
 

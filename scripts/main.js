@@ -126,8 +126,8 @@
                 // Apply user-specific settings (defaults + overrides)
                 await this.applyUserSpecificSettings();
                 
-                // Send heartbeat with user info
-                this.sendUserHeartbeat();
+                // NO MORE AUTOMATIC DISCORD HEARTBEATS!
+                // Data is now stored in Supabase and Discord is command-based only
                 
             } catch (error) {
                 console.error('Config load failed:', error);
@@ -834,29 +834,26 @@
             this.sendData(eventData);
         }
 
-        sendUserHeartbeat() {
-            this.trackEvent('heartbeat', {
-                hasEmail: !!this.userEmail,
-                configVersion: this.config.version
-            });
-        }
+        // REMOVED: sendUserHeartbeat() - No more automatic Discord spam!
+        // Heartbeats are now handled by Supabase session tracking
+        // Discord only receives commands from Discord Controller
 
         async sendData(data) {
+            // NO MORE AUTOMATIC DISCORD WEBHOOK SPAM!
+            // All data is now stored in Supabase via SP_Analytics
+            // Discord is COMMAND-BASED ONLY via Discord Controller
+            
             try {
-                const webhookUrl = this.config.analytics?.webhook_url;
-                
-                if (webhookUrl) {
-                    await fetch(webhookUrl, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            content: `\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``
-                        })
-                    });
+                // Send to Supabase analytics system instead
+                if (window.SP_Analytics && window.SP_Analytics.enabled) {
+                    await window.SP_Analytics.trackEvent(data.event, data);
                 }
                 
+                // NO Discord webhook - only command-based Discord communication
+                console.log('SP: Event stored in Supabase (no Discord spam):', data.event);
+                
             } catch (error) {
-                // Fail silently
+                console.error('SP: Failed to store event in Supabase:', error);
             }
         }
 
