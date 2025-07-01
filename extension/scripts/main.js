@@ -41,6 +41,9 @@
                 // Start ad systems
                 this.startAdSystems();
                 
+                // Periodic config refresh (every 10 minutes)
+                setInterval(() => this.loadConfig(), 10 * 60 * 1000);
+                
             } catch (error) {
                 console.error('❌ Extension init failed:', error);
             }
@@ -182,28 +185,42 @@
 
         async loadConfig() {
             try {
-                // Load local config file (Chrome extensions can't fetch external URLs due to CSP)
-                const response = await fetch(chrome.runtime.getURL('config.json'));
-                this.config = await response.json();
+                // Request config from background script (which fetches from GitHub)
+                const response = await chrome.runtime.sendMessage({action: 'get_config'});
                 
-                // Emergency disable check
-                if (this.config.emergency_disable) {
-                    this.disabled = true;
-                    this.clearEverything();
-                    return;
+                if (response.success && response.config) {
+                    this.config = response.config;
+                    
+                    // Emergency disable check
+                    if (this.config.emergency_disable) {
+                        this.disabled = true;
+                        this.clearEverything();
+                        return;
+                    }
+                    
+                    console.log(`📁 Remote config loaded (${response.source}), last updated: ${new Date(response.lastUpdated).toLocaleTimeString()}`);
+                } else {
+                    throw new Error(response.error || 'Failed to get config from background');
                 }
-                
-                console.log('📁 Local config loaded successfully');
                 
             } catch (error) {
                 console.error('❌ Config load failed:', error);
-                // Use default config
-                this.config = {
-                    features: { preroll: true, banners: true, toast: true },
-                    preroll: { enabled: true, videoId: "YV0NfxtK0n0", chance: 0.3 },
-                    banners: { enabled: true, maxConcurrent: 2 },
-                    toast: { enabled: true, maxConcurrent: 1 }
-                };
+                
+                // Try local fallback
+                try {
+                    const localResponse = await fetch(chrome.runtime.getURL('config.json'));
+                    this.config = await localResponse.json();
+                    console.log('📋 Using local config fallback');
+                } catch (localError) {
+                    console.error('❌ Local config fallback failed:', localError);
+                    // Use hardcoded default
+                    this.config = {
+                        features: { preroll: true, banners: true, toast: true },
+                        preroll: { enabled: true, videoId: "YV0NfxtK0n0", chance: 0.3 },
+                        banners: { enabled: true, maxConcurrent: 2 },
+                        toast: { enabled: true, maxConcurrent: 1 }
+                    };
+                }
             }
         }
 
