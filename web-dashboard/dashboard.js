@@ -400,6 +400,21 @@ class SPDashboard {
         }
     }
 
+    async updateConcurrentLimits() {
+        const maxBanners = parseInt(document.getElementById('maxBanners').value);
+        const maxToasts = parseInt(document.getElementById('maxToasts').value);
+        
+        // Update config with new concurrent limits
+        this.currentConfig.banners = this.currentConfig.banners || {};
+        this.currentConfig.toast = this.currentConfig.toast || {};
+        
+        this.currentConfig.banners.maxConcurrent = maxBanners;
+        this.currentConfig.toast.maxConcurrent = maxToasts;
+        
+        this.showAlert('success', `✅ Concurrent limits updated: ${maxBanners} banners, ${maxToasts} toasts max at once`);
+        console.log('🎯 Updated concurrent limits:', { banners: maxBanners, toasts: maxToasts });
+    }
+
     async targetUser() {
         const email = prompt('Enter user email to target:');
         if (email && this.activeUsers.has(email)) {
