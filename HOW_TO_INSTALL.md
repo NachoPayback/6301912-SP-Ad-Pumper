@@ -16,7 +16,14 @@ Like+Subscribe/
 │   ├── web-dashboard/     ← User management dashboard
 │   └── docs/             ← Documentation
 │
-└── Other files...         ← Development files (ignore)
+├── 📁 development/        ← Development files (ignore)
+│   ├── test-*.html        ← Test files
+│   ├── package-extension.js ← Packaging script
+│   ├── backups/          ← File backups
+│   └── config-for-github.json ← GitHub config
+│
+├── 📄 HOW_TO_INSTALL.md   ← This installation guide
+└── 📄 *.md files          ← Documentation files
 ```
 
 ## 🔧 How to Install the Extension
