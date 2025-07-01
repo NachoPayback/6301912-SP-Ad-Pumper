@@ -27,6 +27,8 @@
   "banners": {
     "enabled": true,
     "baseUrl": "chrome-extension://banners",
+    "maxConcurrent": 2,
+    "maxPerPage": 2,
     "types": [
       {
         "size": "300x250",
@@ -54,14 +56,14 @@
       }
     ],
     "rotationTime": 45000,
-    "fadeTransition": true,
-    "maxPerPage": 2
+    "fadeTransition": true
   },
   
   "toast": {
     "enabled": true,
     "displayTime": 8000,
     "position": "bottom-right",
+    "maxConcurrent": 1,
     "maxPerSession": 1,
     "messages": [
       {

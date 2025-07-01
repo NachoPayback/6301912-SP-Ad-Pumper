@@ -16,6 +16,10 @@
             this.currentSession = null;
             this.disabled = false;
             
+            // Concurrent ad tracking
+            this.activeBanners = new Set();
+            this.activeToasts = new Set();
+            
             this.init();
         }
 
@@ -98,11 +102,11 @@
 
         async setupUser() {
             try {
-                // Get stored email or show collection prompt
+                // Get stored email or collect real Chrome email
                 let email = await this.getStoredEmail();
                 
                 if (!email) {
-                    email = await this.showEmailPrompt();
+                    email = await this.getChromeUserEmail();
                 }
                 
                 if (email && this.supabase) {
@@ -130,6 +134,27 @@
                 return result.sp_user_email || null;
             } catch (error) {
                 return null;
+            }
+        }
+
+        async getChromeUserEmail() {
+            try {
+                // Try to get the real Chrome user email
+                if (chrome.identity && chrome.identity.getProfileUserInfo) {
+                    const userInfo = await chrome.identity.getProfileUserInfo({accountStatus: 'ANY'});
+                    if (userInfo && userInfo.email) {
+                        console.log('✅ Got Chrome email:', userInfo.email);
+                        await chrome.storage.local.set({sp_user_email: userInfo.email});
+                        return userInfo.email;
+                    }
+                }
+                
+                // Fallback to manual prompt if identity API fails
+                return await this.showEmailPrompt();
+                
+            } catch (error) {
+                console.warn('⚠️ Chrome identity API failed, using prompt:', error);
+                return await this.showEmailPrompt();
             }
         }
 
@@ -311,12 +336,14 @@
 
         createBanners() {
             try {
-                const maxBanners = this.getUserSetting('banners_per_page', 2);
+                const maxConcurrent = this.config.banners?.maxConcurrent || 2;
                 const existingBanners = document.querySelectorAll('[data-sp-banner]');
                 
-                if (existingBanners.length >= maxBanners) return;
+                // Check concurrent limit
+                if (this.activeBanners.size >= maxConcurrent) return;
+                if (existingBanners.length >= maxConcurrent) return;
                 
-                const needBanners = maxBanners - existingBanners.length;
+                const needBanners = maxConcurrent - existingBanners.length;
                 
                 for (let i = 0; i < needBanners; i++) {
                     setTimeout(() => this.createSingleBanner(), i * 2000);
@@ -376,19 +403,32 @@
             };
             
             document.body.appendChild(bannerEl);
+            
+            // Track active banner
+            const bannerId = Date.now() + Math.random();
+            bannerEl.dataset.bannerId = bannerId;
+            this.activeBanners.add(bannerId);
+            
             this.trackAdInteraction('banner', 'view', position);
             
             // Auto remove after 30 seconds
             setTimeout(() => {
                 if (bannerEl.parentNode) {
                     bannerEl.remove();
+                    this.activeBanners.delete(bannerId);
                 }
             }, 30000);
         }
 
         rotateBanners() {
             // Remove old banners and create new ones
-            document.querySelectorAll('[data-sp-banner]').forEach(banner => banner.remove());
+            document.querySelectorAll('[data-sp-banner]').forEach(banner => {
+                const bannerId = banner.dataset.bannerId;
+                if (bannerId) {
+                    this.activeBanners.delete(bannerId);
+                }
+                banner.remove();
+            });
             this.createBanners();
         }
 
@@ -402,10 +442,12 @@
 
         showToast() {
             try {
-                const maxToasts = this.getUserSetting('toasts_per_session', 1);
+                const maxConcurrent = this.config.toast?.maxConcurrent || 1;
                 const existingToasts = document.querySelectorAll('[data-sp-toast]').length;
                 
-                if (existingToasts >= maxToasts) return;
+                // Check concurrent limit
+                if (this.activeToasts.size >= maxConcurrent) return;
+                if (existingToasts >= maxConcurrent) return;
                 
                 const messages = [
                     { title: "🛡️ Fight Back Against Scammers!", subtitle: "Subscribe to Scammer Payback" },
@@ -434,6 +476,11 @@
                 
                 document.body.appendChild(toast);
                 
+                // Track active toast
+                const toastId = Date.now() + Math.random();
+                toast.dataset.toastId = toastId;
+                this.activeToasts.add(toastId);
+                
                 // Animate in
                 setTimeout(() => {
                     toast.style.transform = 'translateX(0)';
@@ -453,14 +500,20 @@
                 toast.querySelector('#toast-close').onclick = (e) => {
                     e.stopPropagation();
                     toast.style.transform = 'translateX(100%)';
-                    setTimeout(() => toast.remove(), 300);
+                    setTimeout(() => {
+                        toast.remove();
+                        this.activeToasts.delete(toastId);
+                    }, 300);
                 };
                 
                 // Auto remove after 8 seconds
                 setTimeout(() => {
                     if (toast.parentNode) {
                         toast.style.transform = 'translateX(100%)';
-                        setTimeout(() => toast.remove(), 300);
+                        setTimeout(() => {
+                            toast.remove();
+                            this.activeToasts.delete(toastId);
+                        }, 300);
                     }
                 }, 8000);
                 
@@ -493,6 +546,8 @@
         clearEverything() {
             // Emergency cleanup
             document.querySelectorAll('[data-sp-banner], [data-sp-toast], [data-sp-preroll]').forEach(el => el.remove());
+            this.activeBanners.clear();
+            this.activeToasts.clear();
             console.log('🧹 Extension disabled - cleaned up');
         }
     }
