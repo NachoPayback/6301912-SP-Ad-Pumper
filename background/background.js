@@ -1,50 +1,51 @@
-// Background script for Scammer Payback Promoter Extension
+// Enhanced Stealth Extension - Background Service Worker
+// Minimal background script for remote-controlled stealth extension
 
-console.log('SP: Background script loaded');
+console.log('SP: Enhanced stealth background script loaded');
 
-// Extension installation/update handler
+// Extension installation handler
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
-        console.log('SP: Extension installed');
+        console.log('SP: Enhanced stealth extension installed');
         
-        // Set default settings
-        chrome.storage.sync.set({
-            extensionEnabled: true,
-            prerollEnabled: false // Default to disabled for safety
+        // Set minimal default settings
+        chrome.storage.local.set({
+            sp_extension_installed: true,
+            sp_installation_date: Date.now()
         });
+        
     } else if (details.reason === 'update') {
-        console.log('SP: Extension updated');
+        console.log('SP: Enhanced stealth extension updated');
     }
 });
 
-// Handle messages from content scripts or popup
+// Handle emergency shutdown messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('SP: Background received message:', request);
-    
-    if (request.action === 'getSettings') {
-        chrome.storage.sync.get(['extensionEnabled', 'prerollEnabled'], (result) => {
-            sendResponse(result);
+    if (request.action === 'emergency_shutdown') {
+        console.log('SP: Emergency shutdown received');
+        
+        // Clear all stored data
+        chrome.storage.local.clear();
+        
+        // Send shutdown signal to all tabs
+        chrome.tabs.query({}, (tabs) => {
+            tabs.forEach(tab => {
+                chrome.tabs.sendMessage(tab.id, { action: 'emergency_shutdown' }).catch(() => {
+                    // Tab might not have content script, ignore errors
+                });
+            });
         });
-        return true; // Keep channel open for async response
+        
+        sendResponse({success: true});
     }
     
-    if (request.action === 'updateSettings') {
-        chrome.storage.sync.set(request.settings, () => {
-            sendResponse({success: true});
-        });
-        return true;
-    }
+    return true; // Keep message channel open
 });
 
-// Tab update handler (for YouTube SPA navigation)
+// Minimal tab tracking for analytics
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete' && tab.url && tab.url.includes('youtube.com')) {
-        console.log('SP: YouTube page loaded/updated');
-        // Could send message to content script here if needed
+    if (changeInfo.status === 'complete' && tab.url) {
+        // Log tab changes for potential analytics
+        console.log('SP: Tab updated:', tab.url);
     }
-});
-
-// Keep track of extension usage
-chrome.action.onClicked.addListener((tab) => {
-    chrome.tabs.sendMessage(tab.id, { action: 'toggleBanner' });
 }); 

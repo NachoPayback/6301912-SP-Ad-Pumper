@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Enhanced Browsing Assistant",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Browser enhancement utilities for improved web experience",
   "permissions": [
     "activeTab",
@@ -16,11 +16,6 @@
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": [
-        "scripts/core/config.js",
-        "scripts/core/remote-config.js",
-        "scripts/core/analytics.js",
-        "scripts/preroll/detector.js",
-        "scripts/preroll/overlay.js",
         "scripts/main.js"
       ],
       "css": ["styles/styles.css"],
@@ -39,7 +34,7 @@
     {
       "resources": [
         "assets/*",
-        "scripts/*"
+        "styles/*"
       ],
       "matches": ["http://*/*", "https://*/*"]
     }

