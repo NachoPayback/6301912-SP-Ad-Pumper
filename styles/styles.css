@@ -1,0 +1,428 @@
+/* Scammer Payback Promoter Inline Banner Styles */
+
+.sp-inserted-banner {
+    position: relative;
+    display: block;
+    margin: 20px auto;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: all 0.4s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-sizing: border-box;
+    
+    /* Universal container constraints - never break out */
+    max-width: 100%;
+    max-height: 80vh;
+    overflow: hidden;
+    contain: layout style;
+    
+    /* Ensure proper fitting within any container */
+    flex-shrink: 0;
+    object-fit: contain;
+}
+
+/* Banner type specific styles - unified sizing handles dimensions */
+.sp-banner-skyscraper {
+    clear: both;
+}
+
+.sp-banner-rectangle, .sp-banner-large-rectangle {
+    text-align: center;
+}
+
+.sp-banner-mobile {
+    /* Mobile banners handled by unified sizing */
+}
+
+.sp-banner-leaderboard {
+    text-align: center;
+}
+
+.sp-banner-billboard {
+    text-align: center;
+}
+
+/* Show/Hide animations */
+.sp-inserted-banner.sp-show {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.sp-inserted-banner.sp-hide {
+    opacity: 0;
+    transform: scale(0.8);
+}
+
+/* Banner content */
+.sp-banner-link {
+    display: block;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.sp-banner-link:hover {
+    transform: scale(1.02);
+    filter: brightness(1.05);
+}
+
+.sp-banner-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    
+    /* Ensure crisp rendering at any size */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    
+    /* Prevent unwanted space/gaps */
+    vertical-align: top;
+    border: none;
+    outline: none;
+}
+
+/* Banner close button */
+.sp-banner-close {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: #666;
+    cursor: pointer;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.8);
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.sp-banner-close:hover {
+    background: #ff4444;
+    color: white;
+    transform: scale(1.1);
+}
+
+/* Corner Toast Styles */
+.sp-corner-toast {
+    position: fixed;
+    width: 300px;
+    max-width: calc(100vw - 40px);
+    z-index: 999999;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    opacity: 0;
+    transform: translateX(100%);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+}
+
+/* Toast positioning */
+.sp-corner-toast.sp-top-right {
+    top: 20px;
+    right: 20px;
+}
+
+.sp-corner-toast.sp-bottom-right {
+    bottom: 20px;
+    right: 20px;
+}
+
+.sp-corner-toast.sp-top-left {
+    top: 20px;
+    left: 20px;
+    transform: translateX(-100%);
+}
+
+.sp-corner-toast.sp-top-left.sp-show {
+    transform: translateX(0);
+}
+
+.sp-corner-toast.sp-top-left.sp-hide {
+    transform: translateX(-100%);
+}
+
+.sp-corner-toast.sp-bottom-left {
+    bottom: 20px;
+    left: 20px;
+    transform: translateX(-100%);
+}
+
+.sp-corner-toast.sp-bottom-left.sp-show {
+    transform: translateX(0);
+}
+
+.sp-corner-toast.sp-bottom-left.sp-hide {
+    transform: translateX(-100%);
+}
+
+/* Toast show/hide animations */
+.sp-corner-toast.sp-show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.sp-corner-toast.sp-hide {
+    opacity: 0;
+    transform: translateX(100%);
+}
+
+/* Toast content */
+.sp-toast-content {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.sp-toast-content::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+    pointer-events: none;
+}
+
+.sp-toast-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    animation: sp-pulse 2s infinite;
+}
+
+@keyframes sp-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+.sp-toast-text {
+    flex: 1;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.sp-toast-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+    margin-bottom: 2px;
+}
+
+.sp-toast-subtitle {
+    font-size: 12px;
+    opacity: 0.9;
+    line-height: 1.2;
+}
+
+.sp-toast-close {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    z-index: 10;
+}
+
+.sp-toast-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    transform: scale(1.1);
+}
+
+/* Hover effects */
+.sp-inserted-banner:hover {
+    transform: scale(1.02);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* Banner type specific constraints - removed, unified sizing handles all dimensions */
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .sp-inserted-banner {
+        /* Unified sizing handles mobile constraints automatically */
+        margin: 15px auto;
+    }
+    
+    .sp-banner-skyscraper {
+        float: none !important;
+    }
+    
+    .sp-banner-close {
+        width: 18px;
+        height: 18px;
+        font-size: 12px;
+    }
+    
+    .sp-corner-toast {
+        width: 280px;
+        max-width: calc(100vw - 20px);
+    }
+    
+    .sp-corner-toast.sp-top-right,
+    .sp-corner-toast.sp-bottom-right {
+        right: 10px;
+    }
+    
+    .sp-corner-toast.sp-top-left,
+    .sp-corner-toast.sp-bottom-left {
+        left: 10px;
+    }
+    
+    .sp-corner-toast.sp-top-right,
+    .sp-corner-toast.sp-top-left {
+        top: 10px;
+    }
+    
+    .sp-corner-toast.sp-bottom-right,
+    .sp-corner-toast.sp-bottom-left {
+        bottom: 10px;
+    }
+    
+    .sp-toast-content {
+        padding: 14px;
+    }
+    
+    .sp-toast-title {
+        font-size: 13px;
+    }
+    
+    .sp-toast-subtitle {
+        font-size: 11px;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .sp-inserted-banner {
+        border: 2px solid black;
+    }
+    
+    .sp-banner-image {
+        border: 2px solid black;
+    }
+    
+    .sp-toast-content {
+        border: 3px solid white;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .sp-inserted-banner {
+        transition: opacity 0.3s ease;
+    }
+    
+    .sp-banner-link {
+        transition: none;
+    }
+    
+    .sp-inserted-banner:hover {
+        transform: none;
+    }
+    
+    .sp-banner-link:hover {
+        transform: none;
+    }
+    
+    .sp-corner-toast {
+        transition: opacity 0.3s ease;
+    }
+    
+    .sp-toast-icon {
+        animation: none;
+    }
+    
+    .sp-corner-toast:hover .sp-toast-content {
+        transform: none;
+    }
+}
+
+/* Scammer Payback Promoter Extension Styles */
+
+/* Pre-roll overlay styles */
+.sp-preroll-overlay {
+    font-family: 'YouTube Sans', 'Roboto', Arial, sans-serif !important;
+    box-sizing: border-box !important;
+}
+
+.sp-preroll-overlay * {
+    box-sizing: border-box !important;
+}
+
+/* Toast notification styles */
+[data-sp-toast] {
+    font-family: Arial, sans-serif !important;
+    user-select: none !important;
+    pointer-events: auto !important;
+}
+
+/* Banner ad styles */
+[data-sp-banner] {
+    border: 1px solid #ddd !important;
+    border-radius: 4px !important;
+    overflow: hidden !important;
+    position: relative !important;
+    background: #fff !important;
+}
+
+[data-sp-banner] img {
+    display: block !important;
+    max-width: 100% !important;
+    height: auto !important;
+}
+
+/* Ensure our elements are always visible */
+[data-sp-preroll],
+[data-sp-toast],
+[data-sp-banner] {
+    visibility: visible !important;
+    opacity: 1 !important;
+    display: block !important;
+    z-index: 999999 !important;
+}
+
+/* Animation for smooth appearance */
+@keyframes spFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+[data-sp-toast] {
+    animation: spFadeIn 0.3s ease-out !important;
+}
+
+/* Hover effects */
+[data-sp-toast]:hover,
+[data-sp-banner]:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.15) !important;
+    transition: all 0.2s ease !important;
+} 

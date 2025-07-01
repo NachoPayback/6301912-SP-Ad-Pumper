@@ -1,0 +1,1608 @@
+// Scammer Payback Promoter Content Script
+(function() {
+    'use strict';
+
+    // Configuration
+    const CONFIG = {
+        scammerPaybackUrl: 'https://www.youtube.com/c/ScammerPayback?sub_confirmation=1',
+        rotationTime: 45000 // 45 seconds between ad changes
+    };
+
+    let activeBanners = [];
+    let currentToast = null;
+    let rotationTimer = null;
+    let currentMode = null; // 'banners' or 'toast'
+    let extensionUrl = chrome.runtime.getURL('');
+
+    // Available banner sizes and images with placement preferences
+    const BANNER_TYPES = [
+        { 
+            size: '160x600', 
+            file: 'ad_160x600.png', 
+            type: 'skyscraper', 
+            width: 160, 
+            height: 600,
+            preferredPlacements: ['sidebar', 'google-sidebar', 'youtube-sidebar-top', 'reddit-sidebar', 'twitter-sidebar', 'facebook-sidebar', 'sidebar-area']
+        },
+        { 
+            size: '300x250', 
+            file: 'ad_300x250.png', 
+            type: 'rectangle', 
+            width: 300, 
+            height: 250,
+            preferredPlacements: ['sidebar', 'between', 'article-middle', 'google-sidebar', 'youtube-sidebar-top', 'youtube-main-top', 'sidebar-area', 'content-break']
+        },
+        { 
+            size: '320x50', 
+            file: 'ad_320x50.png', 
+            type: 'mobile', 
+            width: 320, 
+            height: 50,
+            preferredPlacements: ['between', 'google-between-results', 'article-middle', 'youtube-main-top', 'youtube-before-comments', 'reddit-between', 'content-break', 'section-end']
+        },
+        { 
+            size: '336x280', 
+            file: 'ad_336x280.png', 
+            type: 'large-rectangle', 
+            width: 336, 
+            height: 280,
+            preferredPlacements: ['sidebar', 'between', 'article-middle', 'google-sidebar', 'youtube-sidebar-top', 'youtube-main-middle', 'sidebar-area', 'content-break']
+        },
+        { 
+            size: '728x90', 
+            file: 'ad_728x90.png', 
+            type: 'leaderboard', 
+            width: 728, 
+            height: 90,
+            preferredPlacements: ['between', 'google-between-results', 'google-bottom-results', 'article-middle', 'youtube-main-top', 'youtube-main-middle', 'youtube-before-comments', 'content-break', 'section-end']
+        },
+        { 
+            size: '970x250', 
+            file: 'ad_970x250.png', 
+            type: 'billboard', 
+            width: 970, 
+            height: 250,
+            preferredPlacements: ['between', 'google-bottom-results', 'article-middle', 'youtube-main-middle', 'content-break', 'section-end']
+        }
+    ];
+
+    // Toast messages for corner notifications
+    const TOAST_MESSAGES = [
+        {
+            icon: '🛡️',
+            title: 'Fight Back Against Scammers!',
+            subtitle: 'Subscribe to Scammer Payback'
+        },
+        {
+            icon: '⚡',
+            title: 'Stop Phone Scams!',
+            subtitle: 'Join Scammer Payback'
+        },
+        {
+            icon: '🔥',
+            title: 'Hack All Scammers!',
+            subtitle: 'Support Scammer Payback'
+        },
+        {
+            icon: '💪',
+            title: 'Turn the Tables on Scammers!',
+            subtitle: 'Subscribe Now'
+        }
+    ];
+
+    // Create banner element using actual banner images
+    function createBanner(specificBannerType = null) {
+        const bannerType = specificBannerType || BANNER_TYPES[Math.floor(Math.random() * BANNER_TYPES.length)];
+        const bannerId = 'sp-banner-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        
+        const banner = document.createElement('div');
+        banner.id = bannerId;
+        banner.className = `sp-inserted-banner sp-banner-${bannerType.type}`;
+        banner.setAttribute('data-sp-banner', 'true');
+        banner.setAttribute('data-banner-type', bannerType.type);
+        // Don't set fixed dimensions here - will be set dynamically based on container
+        
+        const imgSrc = extensionUrl + 'assets/banners/' + bannerType.file;
+        
+        banner.innerHTML = `
+            <a href="#" class="sp-banner-link" target="_blank">
+                <img src="${imgSrc}" 
+                     alt="Scammer Payback - Fight Back Against Scammers" 
+                     width="${bannerType.width}" 
+                     height="${bannerType.height}"
+                     class="sp-banner-image">
+            </a>
+            <div class="sp-banner-close" title="Close Ad">&times;</div>
+        `;
+        
+        return { element: banner, type: bannerType };
+    }
+
+    // Create corner toast notification
+    function createToast() {
+        const message = TOAST_MESSAGES[Math.floor(Math.random() * TOAST_MESSAGES.length)];
+        const toastId = 'sp-toast-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        
+        const toast = document.createElement('div');
+        toast.id = toastId;
+        toast.className = 'sp-corner-toast';
+        toast.setAttribute('data-sp-toast', 'true');
+        
+        toast.innerHTML = `
+            <div class="sp-toast-content">
+                <div class="sp-toast-icon">${message.icon}</div>
+                <div class="sp-toast-text">
+                    <div class="sp-toast-title">${message.title}</div>
+                    <div class="sp-toast-subtitle">${message.subtitle}</div>
+                </div>
+                <div class="sp-toast-close">&times;</div>
+            </div>
+        `;
+        
+        return toast;
+    }
+
+    // Find proper ad placement locations (site-specific logic)
+    function findAdInsertionPoints() {
+        const validInsertionPoints = [];
+        const hostname = window.location.hostname;
+        
+        // Site-specific ad placement logic
+        if (hostname.includes('google.com')) {
+            return findGoogleAdPlacements();
+        } else if (hostname.includes('youtube.com')) {
+            return findYouTubeAdPlacements();
+        } else if (hostname.includes('reddit.com')) {
+            return findRedditAdPlacements();
+        } else if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
+            return findTwitterAdPlacements();
+        } else if (hostname.includes('facebook.com')) {
+            return findFacebookAdPlacements();
+        } else {
+            return findGenericAdPlacements();
+        }
+    }
+    
+    // Google-specific ad placements
+    function findGoogleAdPlacements() {
+        const points = [];
+        
+        // Right sidebar area (where Google normally shows shopping ads)
+        const rightColumn = document.querySelector('#rhs') || 
+                           document.querySelector('.rhsvw') ||
+                           document.querySelector('[data-st-cnt="rhs"]') ||
+                           document.querySelector('#rhs_block');
+        
+        if (rightColumn && isValidAdContainer(rightColumn)) {
+            points.push({
+                element: rightColumn,
+                type: 'google-sidebar',
+                score: 10
+            });
+            console.log('SP: Found Google right sidebar for ads');
+        }
+        
+        // Between search results (in body content area)
+        const searchResults = document.querySelectorAll('.g, [data-hveid]');
+        const searchContainer = document.querySelector('#search') || document.querySelector('#res');
+        
+        if (searchContainer && searchResults.length >= 3) {
+            searchResults.forEach((result, index) => {
+                // Insert after every 3rd result, but only in the main search body
+                if (index > 0 && index % 3 === 0 && 
+                    searchContainer.contains(result) && 
+                    isValidAdContainer(result)) {
+                    
+                    points.push({
+                        element: result,
+                        type: 'google-between-results',
+                        score: 8
+                    });
+                }
+            });
+            console.log('SP: Found Google between-results placements:', points.filter(p => p.type === 'google-between-results').length);
+        }
+        
+        // Bottom of search results area as fallback
+        if (searchContainer && isValidAdContainer(searchContainer)) {
+            const adWrapper = document.createElement('div');
+            adWrapper.style.clear = 'both';
+            adWrapper.style.marginTop = '30px';
+            adWrapper.style.paddingTop = '20px';
+            adWrapper.style.borderTop = '1px solid #e8eaed';
+            searchContainer.appendChild(adWrapper);
+            
+            points.push({
+                element: adWrapper,
+                type: 'google-bottom-results',
+                score: 6
+            });
+        }
+        
+        console.log('SP: Google ad placement points found:', points.length);
+        return points.sort((a, b) => b.score - a.score);
+    }
+    
+    // YouTube-specific ad placements - target major content areas, not individual videos
+    function findYouTubeAdPlacements() {
+        const points = [];
+        console.log('SP: Finding YouTube major content areas...');
+        
+        // 1. TARGET MAJOR CONTENT SECTIONS (not individual videos)
+        
+        // Main content area - look for the primary content container
+        const mainContentSelectors = [
+            '#contents',                    // Main content container
+            '#primary-inner',              // Primary content area
+            'ytd-rich-grid-renderer',      // Grid renderer for home page
+            '#primary',                    // Primary column
+            'ytd-two-column-browse-results-renderer' // Browse results
+        ];
+        
+        for (let selector of mainContentSelectors) {
+            const element = document.querySelector(selector);
+            if (element && isValidAdContainer(element)) {
+                // Add placement at the TOP of main content (after a few items)
+                points.push({
+                    element: element,
+                    type: 'youtube-main-top',
+                    score: 9,
+                    insertPosition: 'after-first-few' // Special flag
+                });
+                
+                // Add placement in MIDDLE of main content
+                points.push({
+                    element: element,
+                    type: 'youtube-main-middle',
+                    score: 8,
+                    insertPosition: 'middle'
+                });
+                
+                console.log('SP: Found YouTube main content area:', selector);
+                break; // Only need one main content area
+            }
+        }
+        
+        // 2. RIGHT SIDEBAR - treat as one unit
+        const sidebarSelectors = [
+            '#secondary',           // Classic layout
+            '#related',            // Older layout  
+            'ytd-watch-next-secondary-results-renderer', // New layout
+            '#secondary-inner'     // Another variant
+        ];
+        
+        for (let selector of sidebarSelectors) {
+            const element = document.querySelector(selector);
+            if (element && isValidAdContainer(element)) {
+                points.push({
+                    element: element,
+                    type: 'youtube-sidebar-top',
+                    score: 10,
+                    insertPosition: 'top'
+                });
+                console.log('SP: Found YouTube sidebar area:', selector);
+                break; // Only need one sidebar
+            }
+        }
+        
+        // 3. VIDEO PAGE SPECIFIC - comments section boundary
+        const commentsSection = document.querySelector('#comments, ytd-comments');
+        if (commentsSection && isValidAdContainer(commentsSection)) {
+            points.push({
+                element: commentsSection,
+                type: 'youtube-before-comments',
+                score: 7,
+                insertPosition: 'before'
+            });
+            console.log('SP: Found YouTube comments section');
+        }
+        
+        console.log('SP: YouTube major content areas found:', points.length);
+        return points.sort((a, b) => b.score - a.score);
+    }
+    
+    // Reddit-specific ad placements
+    function findRedditAdPlacements() {
+        const points = [];
+        
+        // Right sidebar
+        const sidebar = document.querySelector('[data-testid="subreddit-sidebar"]') ||
+                       document.querySelector('.listing-chooser-collapsed') ||
+                       document.querySelector('#siteTable_organic');
+        
+        if (sidebar && isValidAdContainer(sidebar)) {
+            points.push({
+                element: sidebar,
+                type: 'reddit-sidebar',
+                score: 10
+            });
+        }
+        
+        // Between posts
+        const posts = document.querySelectorAll('[data-testid^="post-container"]');
+        posts.forEach((post, index) => {
+            if (index > 0 && index % 5 === 0 && isValidAdContainer(post)) {
+                points.push({
+                    element: post,
+                    type: 'reddit-between-posts',
+                    score: 8
+                });
+            }
+        });
+        
+        return points.sort((a, b) => b.score - a.score);
+    }
+    
+    // Twitter/X-specific ad placements
+    function findTwitterAdPlacements() {
+        const points = [];
+        
+        // Right sidebar
+        const sidebar = document.querySelector('[data-testid="sidebarColumn"]') ||
+                       document.querySelector('[aria-label="Timeline: Trending now"]')?.parentElement;
+        
+        if (sidebar && isValidAdContainer(sidebar)) {
+            points.push({
+                element: sidebar,
+                type: 'twitter-sidebar',
+                score: 10
+            });
+        }
+        
+        return points.sort((a, b) => b.score - a.score);
+    }
+    
+    // Facebook-specific ad placements
+    function findFacebookAdPlacements() {
+        const points = [];
+        
+        // Right sidebar
+        const sidebar = document.querySelector('[role="complementary"]') ||
+                       document.querySelector('[data-pagelet="RightRail"]');
+        
+        if (sidebar && isValidAdContainer(sidebar)) {
+            points.push({
+                element: sidebar,
+                type: 'facebook-sidebar',
+                score: 10
+            });
+        }
+        
+        return points.sort((a, b) => b.score - a.score);
+    }
+    
+    // Generic website ad placements - find natural content breaks
+    function findGenericAdPlacements() {
+        const points = [];
+        console.log('SP: Finding generic ad placements for', window.location.hostname);
+        
+        // Look for natural content breaks - paragraphs, images, sections
+        const contentBreaks = findContentBreaks();
+        contentBreaks.forEach(breakPoint => {
+            points.push({
+                element: breakPoint.element,
+                type: 'content-break',
+                score: breakPoint.score,
+                breakType: breakPoint.type
+            });
+        });
+        
+        // Look for sidebar-like areas (but not strictly)
+        const sidebarAreas = findSidebarAreas();
+        sidebarAreas.forEach(sidebar => {
+            points.push({
+                element: sidebar.element,
+                type: 'sidebar-area',
+                score: sidebar.score
+            });
+        });
+        
+        // Find end of content sections
+        const sectionEnds = findSectionEnds();
+        sectionEnds.forEach(sectionEnd => {
+            points.push({
+                element: sectionEnd.element,
+                type: 'section-end',
+                score: sectionEnd.score
+            });
+        });
+        
+        console.log('SP: Found', points.length, 'generic placement points');
+        return points.sort((a, b) => b.score - a.score);
+    }
+    
+    // Find natural breaks in content flow
+    function findContentBreaks() {
+        const breaks = [];
+        
+        // Find paragraphs with good spacing
+        const paragraphs = document.querySelectorAll('p');
+        paragraphs.forEach((p, index) => {
+            if (index > 0 && index % 3 === 0 && isGoodContentBreak(p)) {
+                breaks.push({
+                    element: p,
+                    type: 'paragraph-break',
+                    score: 8
+                });
+            }
+        });
+        
+        // Find breaks after images
+        const images = document.querySelectorAll('img');
+        images.forEach(img => {
+            if (isGoodContentBreak(img) && img.offsetHeight > 100) {
+                breaks.push({
+                    element: img,
+                    type: 'after-image',
+                    score: 7
+                });
+            }
+        });
+        
+        // Find breaks between sections/divs
+        const contentSections = document.querySelectorAll('section, article, .content, .post, .entry, main');
+        contentSections.forEach(section => {
+            if (isGoodContentBreak(section) && section.textContent.length > 200) {
+                // Find good break points within the section
+                const children = Array.from(section.children);
+                const midPoint = Math.floor(children.length / 2);
+                if (children[midPoint] && isGoodContentBreak(children[midPoint])) {
+                    breaks.push({
+                        element: children[midPoint],
+                        type: 'section-break',
+                        score: 6
+                    });
+                }
+            }
+        });
+        
+        return breaks;
+    }
+    
+    // Find sidebar-like areas
+    function findSidebarAreas() {
+        const sidebars = [];
+        
+        // Traditional sidebar selectors
+        const sidebarSelectors = [
+            'aside', '.sidebar', '.side-bar', '.right-sidebar', '.left-sidebar',
+            '.widget-area', '.secondary', '#sidebar', '[role="complementary"]'
+        ];
+        
+        sidebarSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(element => {
+                if (isGoodContentBreak(element)) {
+                    sidebars.push({
+                        element: element,
+                        score: 9
+                    });
+                }
+            });
+        });
+        
+        // Look for narrow columns that could be sidebars
+        const allDivs = document.querySelectorAll('div');
+        allDivs.forEach(div => {
+            const rect = div.getBoundingClientRect();
+            const style = window.getComputedStyle(div);
+            
+            // Check if it looks like a sidebar (narrow, tall, positioned to side)
+            if (rect.width > 200 && rect.width < 400 && 
+                rect.height > 300 && 
+                (rect.left < 100 || rect.left > window.innerWidth - 400) &&
+                isGoodContentBreak(div)) {
+                
+                sidebars.push({
+                    element: div,
+                    score: 5
+                });
+            }
+        });
+        
+        return sidebars;
+    }
+    
+    // Find end of content sections
+    function findSectionEnds() {
+        const ends = [];
+        
+        // Find divs that could be good end-of-section placement
+        const contentContainers = document.querySelectorAll('div, section, article');
+        contentContainers.forEach(container => {
+            if (container.textContent.length > 300 && isGoodContentBreak(container)) {
+                ends.push({
+                    element: container,
+                    score: 4
+                });
+            }
+        });
+        
+        return ends;
+    }
+    
+    // Check if an element is a good place for content break
+    function isGoodContentBreak(element) {
+        if (!element || !element.getBoundingClientRect) return false;
+        
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        
+        // Must be visible and reasonably sized
+        if (rect.width < 200 || rect.height < 50 || 
+            style.display === 'none' || 
+            style.visibility === 'hidden' ||
+            element.offsetParent === null) {
+            return false;
+        }
+        
+        // Avoid header/footer/nav areas
+        if (isHeaderFooterNav(element)) {
+            return false;
+        }
+        
+        // Avoid UI elements
+        if (isUIElement(element)) {
+            return false;
+        }
+        
+        // Avoid overlay elements
+        if (isOverlayElement(element)) {
+            return false;
+        }
+        
+        // Must not be too deeply nested in complex UI
+        if (getUIComplexity(element) > 3) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    // Check if element is in header, footer, or navigation
+    function isHeaderFooterNav(element) {
+        const badSelectors = [
+            'header', 'footer', 'nav', '.header', '.footer', '.nav', '.navigation',
+            '.menu', '.navbar', '.site-header', '.site-footer', '#header', '#footer',
+            '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+            '.breadcrumb', '.pagination', '.tags', '.categories'
+        ];
+        
+        // Check if element or any parent matches bad selectors
+        let current = element;
+        while (current && current !== document.body) {
+            for (let selector of badSelectors) {
+                try {
+                    if (current.matches && current.matches(selector)) {
+                        return true;
+                    }
+                } catch (e) {
+                    // Invalid selector, skip
+                }
+                
+                // Also check class names and IDs
+                const className = current.className || '';
+                const id = current.id || '';
+                if (typeof className === 'string' && typeof id === 'string') {
+                    const text = (className + ' ' + id).toLowerCase();
+                    if (text.includes('header') || text.includes('footer') || 
+                        text.includes('nav') || text.includes('menu') ||
+                        text.includes('breadcrumb') || text.includes('pagination')) {
+                        return true;
+                    }
+                }
+            }
+            current = current.parentElement;
+        }
+        return false;
+    }
+    
+    // Check if element is a UI control/form element
+    function isUIElement(element) {
+        const badTags = ['button', 'input', 'select', 'textarea', 'form', 'label'];
+        const tagName = element.tagName.toLowerCase();
+        
+        if (badTags.includes(tagName)) {
+            return true;
+        }
+        
+        // Check for common UI classes
+        const className = element.className || '';
+        if (typeof className === 'string') {
+            const text = className.toLowerCase();
+            if (text.includes('button') || text.includes('form') || 
+                text.includes('input') || text.includes('control') ||
+                text.includes('modal') || text.includes('popup') ||
+                text.includes('dropdown') || text.includes('tooltip')) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    // Get UI complexity score (higher = more complex UI, avoid)
+    function getUIComplexity(element) {
+        let complexity = 0;
+        let current = element;
+        
+        while (current && current !== document.body) {
+            const className = current.className || '';
+            const id = current.id || '';
+            const text = (className + ' ' + id).toLowerCase();
+            
+            // Add complexity for UI-heavy areas
+            if (text.includes('ui-') || text.includes('widget') || 
+                text.includes('control') || text.includes('toolbar') ||
+                text.includes('panel') || text.includes('tab')) {
+                complexity++;
+            }
+            
+            current = current.parentElement;
+        }
+        
+        return complexity;
+    }
+    
+
+    
+    function isValidAdContainer(element) {
+        // Use the more comprehensive content break checker
+        return isGoodContentBreak(element);
+    }
+    
+    function isOverlayElement(element) {
+        // Check if element has overlay/floating positioning
+        const style = window.getComputedStyle(element);
+        const position = style.position;
+        const zIndex = parseInt(style.zIndex) || 0;
+        
+        // Avoid fixed, sticky, or high z-index elements
+        return position === 'fixed' || 
+               position === 'sticky' || 
+               position === 'absolute' && zIndex > 100;
+    }
+    
+    function getBestInsertionPointForBanner(bannerType, insertionPoints) {
+        // Get currently used banner types to avoid duplicates
+        const currentBannerTypes = activeBanners.map(banner => 
+            banner.getAttribute('data-banner-type')
+        ).filter(Boolean);
+        
+        // Match banner type to preferred placements
+        const preferredPlacements = bannerType.preferredPlacements || [];
+        
+        // Find points that match the banner's preferred placement types
+        let suitablePoints = insertionPoints.filter(point => {
+            return preferredPlacements.some(preferred => 
+                point.type.includes(preferred) || 
+                point.type === preferred
+            );
+        });
+        
+        // If no preferred points found, use fallback logic
+        if (suitablePoints.length === 0) {
+            if (bannerType.type === 'skyscraper') {
+                suitablePoints = insertionPoints.filter(point => point.type.includes('sidebar'));
+            } else if (bannerType.type === 'leaderboard' || bannerType.type === 'billboard') {
+                suitablePoints = insertionPoints.filter(point => 
+                    point.type.includes('between') || point.type.includes('bottom')
+                );
+            } else {
+                suitablePoints = insertionPoints; // Rectangles are flexible
+            }
+        }
+        
+        // Return best point or null if none found
+        return suitablePoints.length > 0 ? suitablePoints[0] : null;
+    }
+
+    // Get a different banner type than currently displayed
+    function getDifferentBannerType() {
+        const currentBannerTypes = activeBanners.map(banner => 
+            banner.getAttribute('data-banner-type')
+        ).filter(Boolean);
+        
+        // Find banner types not currently used
+        const availableBannerTypes = BANNER_TYPES.filter(bannerType => 
+            !currentBannerTypes.includes(bannerType.type)
+        );
+        
+        // If all types are used, use any type (fallback)
+        const typesToChooseFrom = availableBannerTypes.length > 0 ? availableBannerTypes : BANNER_TYPES;
+        
+        return typesToChooseFrom[Math.floor(Math.random() * typesToChooseFrom.length)];
+    }
+
+    // Insert banner into page content
+    function insertBanner(forceNewType = false) {
+        const insertionPoints = findAdInsertionPoints();
+        if (insertionPoints.length === 0) {
+            console.log('SP: No valid insertion points found for', window.location.hostname);
+            return null;
+        }
+        
+        // Get banner type - ensure it's different if we have multiple banners
+        const bannerType = forceNewType ? getDifferentBannerType() : null;
+        const bannerData = createBanner(bannerType);
+        const banner = bannerData.element;
+        const finalBannerType = bannerData.type;
+        
+        const insertionPoint = getBestInsertionPointForBanner(finalBannerType, insertionPoints);
+        if (!insertionPoint) {
+            console.log('SP: No suitable insertion point for banner type:', finalBannerType.type);
+            // Try with any available insertion point as fallback
+            if (insertionPoints.length > 0) {
+                const fallbackPoint = insertionPoints[0];
+                console.log('SP: Using fallback insertion point:', fallbackPoint.type);
+                return insertBannerAtPoint(banner, finalBannerType, fallbackPoint);
+            }
+            return null;
+        }
+        
+        return insertBannerAtPoint(banner, finalBannerType, insertionPoint);
+    }
+    
+    // Universal ad sizing - calculates optimal banner size for any container
+    function calculateOptimalBannerSize(bannerType, targetElement, insertionPoint) {
+        const originalWidth = bannerType.width;
+        const originalHeight = bannerType.height;
+        const aspectRatio = originalWidth / originalHeight;
+        
+        // Get viewport constraints (emergency fallback)
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const maxViewportWidth = viewportWidth * 0.95;
+        const maxViewportHeight = viewportHeight * 0.8;
+        
+        // Get container dimensions
+        let containerRect;
+        try {
+            containerRect = targetElement.getBoundingClientRect();
+        } catch (e) {
+            // Fallback if element not in DOM yet
+            containerRect = { width: viewportWidth * 0.8, height: viewportHeight * 0.6 };
+        }
+        
+        let availableWidth, availableHeight;
+        
+        // Calculate available space based on placement type
+        if (insertionPoint.type.includes('sidebar')) {
+            // Sidebar: constrain to sidebar width, generous height
+            availableWidth = Math.min(containerRect.width * 0.95, 400); // Max 400px for sidebars
+            availableHeight = Math.min(containerRect.height * 0.8, maxViewportHeight);
+            
+        } else if (insertionPoint.type.includes('main') || insertionPoint.type.includes('content') || insertionPoint.type.includes('between')) {
+            // Main content: more generous width, reasonable height
+            availableWidth = Math.min(containerRect.width * 0.9, 1000); // Max 1000px for main content
+            availableHeight = Math.min(containerRect.height * 0.3, 400); // Don't dominate content
+            
+        } else if (insertionPoint.type.includes('article')) {
+            // Article content: fit article width, moderate height
+            availableWidth = Math.min(containerRect.width * 0.85, 600);
+            availableHeight = Math.min(containerRect.height * 0.4, 300);
+            
+        } else {
+            // Generic/fallback: balanced constraints
+            availableWidth = Math.min(containerRect.width * 0.8, 800);
+            availableHeight = Math.min(containerRect.height * 0.5, 500);
+        }
+        
+        // Apply viewport constraints (never bigger than screen)
+        availableWidth = Math.min(availableWidth, maxViewportWidth);
+        availableHeight = Math.min(availableHeight, maxViewportHeight);
+        
+        // Calculate scaled dimensions maintaining aspect ratio
+        let optimalWidth = originalWidth;
+        let optimalHeight = originalHeight;
+        
+        // Scale down if banner is too wide
+        if (optimalWidth > availableWidth) {
+            optimalWidth = availableWidth;
+            optimalHeight = optimalWidth / aspectRatio;
+        }
+        
+        // Scale down if banner is too tall
+        if (optimalHeight > availableHeight) {
+            optimalHeight = availableHeight;
+            optimalWidth = optimalHeight * aspectRatio;
+        }
+        
+        // Minimum size constraints (ads must be readable)
+        const minWidth = Math.min(originalWidth, 120); // Never smaller than 120px wide
+        const minHeight = Math.min(originalHeight, 50); // Never smaller than 50px tall
+        
+        optimalWidth = Math.max(optimalWidth, minWidth);
+        optimalHeight = Math.max(optimalHeight, minHeight);
+        
+        // Recalculate if minimum size breaks aspect ratio
+        if (optimalWidth === minWidth && optimalWidth / optimalHeight !== aspectRatio) {
+            optimalHeight = optimalWidth / aspectRatio;
+        }
+        if (optimalHeight === minHeight && optimalWidth / optimalHeight !== aspectRatio) {
+            optimalWidth = optimalHeight * aspectRatio;
+        }
+        
+        console.log(`SP: Banner sizing - Original: ${originalWidth}x${originalHeight}, Container: ${Math.round(containerRect.width)}x${Math.round(containerRect.height)}, Optimal: ${Math.round(optimalWidth)}x${Math.round(optimalHeight)}, Type: ${insertionPoint.type}`);
+        
+        return {
+            width: Math.round(optimalWidth),
+            height: Math.round(optimalHeight),
+            isScaled: optimalWidth !== originalWidth || optimalHeight !== originalHeight
+        };
+    }
+    
+    function insertBannerAtPoint(banner, bannerType, insertionPoint) {
+        const targetElement = insertionPoint.element;
+        
+        // Verify target element is still valid
+        if (!targetElement || !document.body.contains(targetElement)) {
+            console.log('SP: Target element no longer valid');
+            return null;
+        }
+        
+        // Insert banner based on insertion point type with proper spacing
+        banner.style.display = 'block';
+        banner.style.clear = 'both';
+        banner.style.position = 'static'; // Ensure it's in document flow
+        
+        // UNIVERSAL AD SIZING: Fit container while maintaining aspect ratio
+        const optimalSize = calculateOptimalBannerSize(bannerType, targetElement, insertionPoint);
+        
+        banner.style.width = optimalSize.width + 'px';
+        banner.style.height = optimalSize.height + 'px';
+        
+        // Ensure the image scales properly within the banner
+        const bannerImg = banner.querySelector('.sp-banner-image');
+        if (bannerImg) {
+            bannerImg.style.width = '100%';
+            bannerImg.style.height = '100%';
+            bannerImg.style.objectFit = 'contain'; // Never crop, always scale proportionally
+            bannerImg.style.display = 'block';
+        }
+        
+        try {
+            if (insertionPoint.type === 'google-sidebar') {
+                // Insert at top of Google's right sidebar
+                targetElement.insertBefore(banner, targetElement.firstChild);
+                banner.style.marginBottom = '20px';
+                
+            } else if (insertionPoint.type === 'google-between-results') {
+                // Insert after search result with proper spacing
+                if (targetElement.parentNode) {
+                    targetElement.parentNode.insertBefore(banner, targetElement.nextSibling);
+                    banner.style.margin = '20px 0';
+                    banner.style.textAlign = 'center';
+                } else {
+                    return null;
+                }
+                
+            } else if (insertionPoint.type === 'google-bottom-results') {
+                // Insert in dedicated ad area at bottom of results
+                targetElement.appendChild(banner);
+                banner.style.margin = '20px auto';
+                banner.style.textAlign = 'center';
+                
+            } else if (insertionPoint.type.includes('sidebar')) {
+                // Sidebar placements
+                targetElement.insertBefore(banner, targetElement.firstChild);
+                banner.style.marginBottom = '20px';
+                
+            } else if (insertionPoint.type === 'youtube-main-top') {
+                // YouTube main content area - after first few items
+                const childElements = Array.from(targetElement.children);
+                const insertAfterIndex = Math.min(2, childElements.length - 1); // After 2nd item or last
+                const insertAfterElement = childElements[insertAfterIndex];
+                
+                if (insertAfterElement) {
+                    targetElement.insertBefore(banner, insertAfterElement.nextSibling);
+                } else {
+                    targetElement.appendChild(banner);
+                }
+                banner.style.margin = '30px auto';
+                banner.style.textAlign = 'center';
+                banner.style.display = 'block';
+                
+            } else if (insertionPoint.type === 'youtube-main-middle') {
+                // YouTube main content area - middle placement
+                const childElements = Array.from(targetElement.children);
+                const middleIndex = Math.floor(childElements.length / 2);
+                const insertAfterElement = childElements[middleIndex];
+                
+                if (insertAfterElement) {
+                    targetElement.insertBefore(banner, insertAfterElement.nextSibling);
+                } else {
+                    targetElement.appendChild(banner);
+                }
+                banner.style.margin = '40px auto';
+                banner.style.textAlign = 'center';
+                banner.style.display = 'block';
+                
+            } else if (insertionPoint.type === 'youtube-sidebar-top') {
+                // YouTube sidebar - top placement
+                targetElement.insertBefore(banner, targetElement.firstChild);
+                banner.style.marginBottom = '25px';
+                
+            } else if (insertionPoint.type === 'youtube-before-comments') {
+                // YouTube - before comments section
+                if (targetElement.parentNode) {
+                    targetElement.parentNode.insertBefore(banner, targetElement);
+                    banner.style.margin = '30px auto';
+                    banner.style.textAlign = 'center';
+                    banner.style.display = 'block';
+                } else {
+                    return null;
+                }
+                
+            } else if (insertionPoint.type === 'youtube-fallback') {
+                // YouTube fallback containers - place at beginning with good spacing
+                targetElement.insertBefore(banner, targetElement.firstChild);
+                banner.style.margin = '20px auto';
+                banner.style.textAlign = 'center';
+                banner.style.display = 'block';
+                
+            } else if (insertionPoint.type.includes('between')) {
+                // Between content placements
+                if (targetElement.parentNode) {
+                    targetElement.parentNode.insertBefore(banner, targetElement.nextSibling);
+                    banner.style.margin = '20px 0';
+                    banner.style.textAlign = 'center';
+                } else {
+                    targetElement.appendChild(banner);
+                    banner.style.margin = '20px 0';
+                }
+                
+            } else if (insertionPoint.type.includes('article-middle')) {
+                // Middle of article content
+                if (targetElement.parentNode) {
+                    targetElement.parentNode.insertBefore(banner, targetElement.nextSibling);
+                    banner.style.margin = '30px auto';
+                    banner.style.textAlign = 'center';
+                } else {
+                    return null; // Can't insert without parent
+                }
+                
+            } else if (insertionPoint.type === 'content-break') {
+                // Natural content breaks - insert after the element
+                if (targetElement.parentNode) {
+                    targetElement.parentNode.insertBefore(banner, targetElement.nextSibling);
+                    banner.style.margin = '25px auto';
+                    banner.style.textAlign = 'center';
+                    banner.style.display = 'block';
+                } else {
+                    return null;
+                }
+                
+            } else if (insertionPoint.type === 'sidebar-area') {
+                // Sidebar-like areas
+                targetElement.insertBefore(banner, targetElement.firstChild);
+                banner.style.marginBottom = '20px';
+                
+            } else if (insertionPoint.type === 'section-end') {
+                // End of content sections
+                targetElement.appendChild(banner);
+                banner.style.margin = '20px auto';
+                banner.style.textAlign = 'center';
+                banner.style.display = 'block';
+                
+            } else {
+                // Default: insert at beginning with spacing
+                targetElement.insertBefore(banner, targetElement.firstChild);
+                banner.style.marginBottom = '20px';
+            }
+        } catch (error) {
+            console.log('SP: Error inserting banner:', error);
+            return null;
+        }
+        
+        // Add click handlers
+        banner.querySelector('.sp-banner-link').addEventListener('click', handleBannerClick);
+        banner.querySelector('.sp-banner-close').addEventListener('click', handleBannerCloseClick);
+        
+        // Add to active banners
+        activeBanners.push(banner);
+        
+        // Animate in
+        setTimeout(() => {
+            banner.classList.add('sp-show');
+        }, 100);
+        
+        console.log('SP: Banner inserted:', bannerType.type, 'at', insertionPoint.type, 
+                   insertionPoint.breakType ? '(' + insertionPoint.breakType + ')' : '');
+        return banner;
+    }
+
+    // Show corner toast
+    function showToast() {
+        console.log('SP: Creating toast...');
+        
+        // Remove existing toast
+        if (currentToast && currentToast.parentNode) {
+            currentToast.classList.add('sp-hide');
+            setTimeout(() => {
+                if (currentToast.parentNode) {
+                    currentToast.parentNode.removeChild(currentToast);
+                }
+            }, 300);
+        }
+        
+        const toast = createToast();
+        currentToast = toast;
+        
+        // Position in random corner
+        const positions = ['top-right', 'bottom-right', 'top-left', 'bottom-left'];
+        const position = positions[Math.floor(Math.random() * positions.length)];
+        toast.classList.add(`sp-${position}`);
+        
+        // Make toast more resilient to page changes
+        toast.style.zIndex = '2147483647'; // Maximum z-index
+        toast.style.position = 'fixed';
+        toast.style.pointerEvents = 'auto';
+        
+        // Force append to body with retry logic
+        const appendToast = () => {
+            try {
+                if (document.body) {
+                    document.body.appendChild(toast);
+                    console.log('SP: Toast appended to body');
+                    return true;
+                } else {
+                    console.log('SP: Body not ready, retrying...');
+                    return false;
+                }
+            } catch (error) {
+                console.log('SP: Error appending toast:', error);
+                return false;
+            }
+        };
+        
+        // Try to append, with retries if needed
+        if (!appendToast()) {
+            setTimeout(() => {
+                appendToast();
+            }, 100);
+        }
+        
+        // Animate in with delay to ensure DOM is ready
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.classList.add('sp-show');
+                console.log('SP: Toast animated in');
+            } else {
+                console.log('SP: Toast lost from DOM, re-adding...');
+                appendToast();
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.classList.add('sp-show');
+                    }
+                }, 100);
+            }
+        }, 200);
+        
+        // Add click handlers
+        toast.addEventListener('click', handleToastClick);
+        toast.querySelector('.sp-toast-close').addEventListener('click', handleToastCloseClick);
+        
+        // Check if toast is still there periodically (YouTube SPA fix)
+        const toastChecker = setInterval(() => {
+            if (currentToast === toast) {
+                if (!document.body.contains(toast)) {
+                    console.log('SP: Toast removed by page change, re-adding...');
+                    appendToast();
+                    if (toast.parentNode) {
+                        toast.classList.add('sp-show');
+                    }
+                }
+            } else {
+                clearInterval(toastChecker);
+            }
+        }, 2000);
+        
+        // Auto-hide after 8 seconds
+        setTimeout(() => {
+            if (toast.parentNode && currentToast === toast) {
+                toast.classList.add('sp-hide');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                    if (currentToast === toast) {
+                        currentToast = null;
+                    }
+                }, 300);
+            }
+            clearInterval(toastChecker);
+        }, 8000);
+    }
+
+    // Clear all current ads
+    function clearAllAds() {
+        console.log('SP: clearAllAds() called - clearing', activeBanners.length, 'banners');
+        
+        // Remove all tracked banners
+        activeBanners.forEach(banner => {
+            if (banner && banner.parentNode) {
+                banner.classList.add('sp-hide');
+                setTimeout(() => {
+                    if (banner.parentNode) {
+                        banner.parentNode.removeChild(banner);
+                    }
+                }, 300);
+            }
+        });
+        activeBanners = [];
+        
+        // Also find and remove any untracked banners (safety cleanup)
+        const allSpBanners = document.querySelectorAll('[data-sp-banner]');
+        if (allSpBanners.length > 0) {
+            console.log('SP: Found', allSpBanners.length, 'untracked banners, removing...');
+            allSpBanners.forEach(banner => {
+                if (banner.parentNode) {
+                    banner.parentNode.removeChild(banner);
+                }
+            });
+        }
+        
+        // Remove toast
+        if (currentToast && currentToast.parentNode) {
+            currentToast.classList.add('sp-hide');
+            setTimeout(() => {
+                if (currentToast.parentNode) {
+                    currentToast.parentNode.removeChild(currentToast);
+                }
+                currentToast = null;
+            }, 300);
+        }
+        
+        // Also clean up any untracked toasts
+        const allSpToasts = document.querySelectorAll('[data-sp-toast]');
+        if (allSpToasts.length > 0) {
+            console.log('SP: Found', allSpToasts.length, 'untracked toasts, removing...');
+            allSpToasts.forEach(toast => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            });
+        }
+    }
+
+    // Show ads (randomly choose between 2 banners OR 1 toast)
+    function showAds() {
+        console.log('SP: showAds() called - current banners:', activeBanners.length);
+        clearAllAds();
+        
+        // Wait for clear animation to complete
+        setTimeout(() => {
+            // Double-check that ads are actually cleared
+            if (activeBanners.length > 0) {
+                console.log('SP: Warning - banners not properly cleared, force clearing...');
+                activeBanners.forEach(banner => {
+                    if (banner && banner.parentNode) {
+                        banner.parentNode.removeChild(banner);
+                    }
+                });
+                activeBanners = [];
+            }
+            
+            // Randomly choose between banners (70%) or toast (30%)
+            if (Math.random() < 0.7) {
+                // Show MAXIMUM 2 banners in DIFFERENT locations
+                currentMode = 'banners';
+                console.log('SP: Showing 2 banners in different locations');
+                
+                // Get all available insertion points
+                const allInsertionPoints = findAdInsertionPoints();
+                console.log('SP: Found', allInsertionPoints.length, 'insertion points');
+                
+                if (allInsertionPoints.length >= 1) {
+                    // Create exactly 2 banners, reusing insertion points if necessary
+                    console.log('SP: Creating exactly 2 banners...');
+                    
+                    // Insert first banner at best location
+                    const banner1 = insertBannerAtSpecificPoint(allInsertionPoints[0]);
+                    
+                    // Insert second banner with delay
+                    setTimeout(() => {
+                        // Only create second banner if we still have less than 2 banners
+                        if (activeBanners.length < 2) {
+                            console.log('SP: Creating second banner...');
+                            
+                            let secondPoint;
+                            if (allInsertionPoints.length >= 2) {
+                                // Find different location if available
+                                secondPoint = findDifferentInsertionPoint(allInsertionPoints, allInsertionPoints[0]);
+                                if (!secondPoint) {
+                                    // If no different point, use second-best point
+                                    secondPoint = allInsertionPoints[1];
+                                }
+                            } else {
+                                // Only one insertion point - reuse it but with different banner type
+                                secondPoint = allInsertionPoints[0];
+                                console.log('SP: Reusing single insertion point for second banner');
+                            }
+                            
+                            if (secondPoint) {
+                                // Force different banner type for second banner
+                                const banner2 = insertBannerAtSpecificPoint(secondPoint, true);
+                            }
+                        } else {
+                            console.log('SP: Skipping second banner - already have', activeBanners.length, 'banners');
+                        }
+                    }, 500);
+                    
+                } else {
+                    console.log('SP: No valid insertion points found for', window.location.hostname);
+                }
+                
+            } else {
+                // Show 1 toast
+                currentMode = 'toast';
+                console.log('SP: Showing 1 toast');
+                showToast();
+            }
+        }, 500); // Increased delay to ensure clearing
+    }
+    
+    // Find a different insertion point from the one already used
+    function findDifferentInsertionPoint(allPoints, usedPoint) {
+        // Filter out points that are the same type or same element
+        const differentPoints = allPoints.filter(point => 
+            point.type !== usedPoint.type && 
+            point.element !== usedPoint.element
+        );
+        
+        // Return the highest-scored different point
+        return differentPoints.length > 0 ? differentPoints[0] : null;
+    }
+    
+    // Insert banner at a specific insertion point
+    function insertBannerAtSpecificPoint(insertionPoint, forceDifferentType = false) {
+        // ENFORCE STRICT LIMIT: Never allow more than 2 banners
+        if (activeBanners.length >= 2) {
+            console.log('SP: Banner limit reached (2), not creating more banners');
+            return null;
+        }
+        
+        console.log('SP: Creating banner at', insertionPoint.type, '- current count:', activeBanners.length);
+        
+        // Get a banner type that matches the insertion point and is different from existing banners
+        let bannerType = null;
+        
+        if (forceDifferentType) {
+            // Get a different banner type than what's currently displayed
+            bannerType = getDifferentBannerType();
+            
+            // Also check if this banner type is suitable for this insertion point
+            const preferredPlacements = bannerType.preferredPlacements || [];
+            const isPreferred = preferredPlacements.some(preferred => 
+                insertionPoint.type.includes(preferred) || 
+                insertionPoint.type === preferred
+            );
+            
+            // If not preferred, try to find a better match among unused types
+            if (!isPreferred) {
+                const currentBannerTypes = activeBanners.map(banner => 
+                    banner.getAttribute('data-banner-type')
+                ).filter(Boolean);
+                
+                const availableBannerTypes = BANNER_TYPES.filter(bt => 
+                    !currentBannerTypes.includes(bt.type) &&
+                    bt.preferredPlacements.some(preferred => 
+                        insertionPoint.type.includes(preferred) || 
+                        insertionPoint.type === preferred
+                    )
+                );
+                
+                if (availableBannerTypes.length > 0) {
+                    bannerType = availableBannerTypes[0];
+                }
+            }
+        }
+        
+        const bannerData = createBanner(bannerType);
+        const banner = bannerData.element;
+        const finalBannerType = bannerData.type;
+        
+        const result = insertBannerAtPoint(banner, finalBannerType, insertionPoint);
+        
+        // Double-check that we don't exceed the limit after insertion
+        if (activeBanners.length > 2) {
+            console.log('SP: Banner limit exceeded! Removing excess banners...');
+            while (activeBanners.length > 2) {
+                const excessBanner = activeBanners.pop();
+                if (excessBanner && excessBanner.parentNode) {
+                    excessBanner.parentNode.removeChild(excessBanner);
+                }
+            }
+        }
+        
+        return result;
+    }
+
+    // Start ad rotation
+    function startAdRotation() {
+        showAds();
+        
+        // Schedule next rotation
+        if (rotationTimer) {
+            clearTimeout(rotationTimer);
+        }
+        rotationTimer = setTimeout(() => {
+            startAdRotation();
+        }, CONFIG.rotationTime);
+    }
+
+    // Ensure ads are present and maintain exactly the right count
+    function ensureAdsPresent() {
+        const validBanners = activeBanners.filter(banner => 
+            banner && document.body.contains(banner)
+        );
+        const hasActiveToast = currentToast && document.body.contains(currentToast);
+        
+        // Update activeBanners array to only include valid banners
+        activeBanners = validBanners;
+        
+        console.log('SP: ensureAdsPresent check - mode:', currentMode, 'valid banners:', validBanners.length, 'toast:', !!hasActiveToast);
+        
+        if (currentMode === 'banners') {
+            // Banner mode: maintain exactly 2 banners
+            if (validBanners.length < 2) {
+                const needed = 2 - validBanners.length;
+                console.log('SP: Banner mode needs', needed, 'more banners');
+                
+                // Create missing banners
+                for (let i = 0; i < needed; i++) {
+                    setTimeout(() => {
+                        if (activeBanners.length < 2) {
+                            createReplacementBanner();
+                        }
+                    }, i * 200); // Stagger creation slightly
+                }
+            } else if (validBanners.length > 2) {
+                console.log('SP: Too many banners detected, removing excess...');
+                while (activeBanners.length > 2) {
+                    const excessBanner = activeBanners.pop();
+                    if (excessBanner && excessBanner.parentNode) {
+                        excessBanner.parentNode.removeChild(excessBanner);
+                    }
+                }
+            }
+            
+        } else if (currentMode === 'toast') {
+            // Toast mode: maintain exactly 1 toast
+            if (!hasActiveToast) {
+                console.log('SP: Toast mode needs a toast');
+                showToast();
+            }
+            
+        } else {
+            // No mode set or both missing - start new rotation
+            if (validBanners.length === 0 && !hasActiveToast) {
+                console.log('SP: No ads present and no mode set, showing new ads');
+                showAds();
+            }
+        }
+    }
+
+    // Handle banner click (open subscription page)
+    function handleBannerClick(e) {
+        e.preventDefault();
+        window.open(CONFIG.scammerPaybackUrl, '_blank');
+    }
+
+    // Handle banner close button click
+    function handleBannerCloseClick(e) {
+        e.stopPropagation();
+        const banner = e.currentTarget.closest('[data-sp-banner]');
+        
+        if (banner) {
+            console.log('SP: Banner close clicked - current count before removal:', activeBanners.length);
+            
+            // Immediately remove from active banners list to allow replacement creation
+            const index = activeBanners.indexOf(banner);
+            if (index > -1) {
+                activeBanners.splice(index, 1);
+                console.log('SP: Removed banner from tracking - new count:', activeBanners.length);
+            }
+            
+            // Hide with animation
+            banner.classList.add('sp-hide');
+            setTimeout(() => {
+                if (banner.parentNode) {
+                    banner.parentNode.removeChild(banner);
+                }
+            }, 300);
+            
+            // ALWAYS create replacement if in banner mode to maintain exactly 2 banners
+            if (currentMode === 'banners') {
+                console.log('SP: Banner closed, creating immediate replacement to maintain 2 banners');
+                // Create replacement immediately since we've already removed the banner from tracking
+                setTimeout(() => {
+                    createReplacementBanner();
+                }, 100); // Very short delay to ensure DOM state is consistent
+            }
+        }
+    }
+    
+    // Create a replacement banner to maintain exactly 2 on screen
+    function createReplacementBanner() {
+        console.log('SP: Creating replacement banner - current count:', activeBanners.length);
+        
+        if (activeBanners.length >= 2) {
+            console.log('SP: Already have 2+ banners, not creating replacement');
+            return;
+        }
+        
+        // Get insertion points and find an unused one
+        const allInsertionPoints = findAdInsertionPoints();
+        if (allInsertionPoints.length === 0) {
+            console.log('SP: No insertion points available for replacement');
+            return;
+        }
+        
+        // Find an insertion point that's different from current banners
+        let availablePoint = null;
+        for (let point of allInsertionPoints) {
+            let isUsed = false;
+            for (let banner of activeBanners) {
+                const bannerParent = banner.parentNode;
+                if (bannerParent === point.element || bannerParent?.contains(point.element) || point.element.contains(bannerParent)) {
+                    isUsed = true;
+                    break;
+                }
+            }
+            if (!isUsed) {
+                availablePoint = point;
+                break;
+            }
+        }
+        
+        // If no different point found, use the first available point
+        if (!availablePoint) {
+            availablePoint = allInsertionPoints[0];
+        }
+        
+        console.log('SP: Creating replacement banner at:', availablePoint.type);
+        insertBannerAtSpecificPoint(availablePoint, true); // Force different type
+    }
+
+    // Handle toast click (open subscription page)
+    function handleToastClick(e) {
+        if (e.target.classList.contains('sp-toast-close')) {
+            return; // Let close handler handle this
+        }
+        
+        e.preventDefault();
+        window.open(CONFIG.scammerPaybackUrl, '_blank');
+        
+        // Hide toast after click and handle respawning
+        if (currentToast && currentToast.parentNode) {
+            const wasInToastMode = currentMode === 'toast';
+            
+            currentToast.classList.add('sp-hide');
+            setTimeout(() => {
+                if (currentToast.parentNode) {
+                    currentToast.parentNode.removeChild(currentToast);
+                }
+                currentToast = null;
+                
+                // Respawn toast after click if in toast mode
+                if (wasInToastMode) {
+                    const waitTime = 1000 + Math.random() * 1000; // 1-2 seconds
+                    console.log('SP: Toast clicked, will respawn in', Math.round(waitTime), 'ms');
+                    
+                    setTimeout(() => {
+                        if (currentMode === 'toast' && !currentToast) {
+                            console.log('SP: Respawning toast after click');
+                            showToast();
+                        }
+                    }, waitTime);
+                }
+            }, 300);
+        }
+    }
+
+    // Handle toast close button click
+    function handleToastCloseClick(e) {
+        e.stopPropagation();
+        console.log('SP: Toast close clicked');
+        
+        if (currentToast && currentToast.parentNode) {
+            currentToast.classList.add('sp-hide');
+            setTimeout(() => {
+                if (currentToast.parentNode) {
+                    currentToast.parentNode.removeChild(currentToast);
+                }
+                currentToast = null;
+            }, 300);
+            
+            // Wait 1-2 seconds then spawn a new toast if still in toast mode
+            if (currentMode === 'toast') {
+                const waitTime = 1000 + Math.random() * 1000; // 1-2 seconds
+                console.log('SP: Toast closed, will respawn in', Math.round(waitTime), 'ms');
+                
+                setTimeout(() => {
+                    // Only respawn if we're still in toast mode and don't have a current toast
+                    if (currentMode === 'toast' && !currentToast) {
+                        console.log('SP: Respawning toast after close');
+                        showToast();
+                    } else {
+                        console.log('SP: Not respawning toast - mode:', currentMode, 'currentToast:', !!currentToast);
+                    }
+                }, waitTime);
+            }
+        }
+    }
+
+    // Initialize the extension - inject ads into all pages
+    function init() {
+        // Wait for page to be fully loaded
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+            return;
+        }
+        
+        // Start showing ads after page load
+        setTimeout(() => {
+            startAdRotation(); // Start ad rotation cycle
+        }, 2000);
+        
+        // Monitor page to ensure ads are always present
+        setInterval(() => {
+            // Check for banner limit violations every cycle
+            const allBannersOnPage = document.querySelectorAll('[data-sp-banner]');
+            if (allBannersOnPage.length > 2) {
+                console.log('SP: VIOLATION! Found', allBannersOnPage.length, 'banners on page, removing excess...');
+                // Remove excess banners (keep first 2)
+                for (let i = 2; i < allBannersOnPage.length; i++) {
+                    if (allBannersOnPage[i].parentNode) {
+                        allBannersOnPage[i].parentNode.removeChild(allBannersOnPage[i]);
+                    }
+                }
+                // Update activeBanners array
+                activeBanners = Array.from(document.querySelectorAll('[data-sp-banner]'));
+            }
+            
+            ensureAdsPresent();
+        }, 20000); // Check every 20 seconds
+        
+        // Monitor for page changes (SPA navigation)
+        const observer = new MutationObserver((mutations) => {
+            let significantChange = false;
+            mutations.forEach(mutation => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    for (let node of mutation.addedNodes) {
+                        if (node.nodeType === 1 && !node.hasAttribute('data-sp-banner') && !node.hasAttribute('data-sp-toast')) {
+                            significantChange = true;
+                            break;
+                        }
+                    }
+                }
+            });
+            
+            if (significantChange) {
+                setTimeout(ensureAdsPresent, 3000);
+            }
+        });
+        
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        // Handle page focus to ensure ads are still there
+        window.addEventListener('focus', () => {
+            setTimeout(ensureAdsPresent, 1000);
+        });
+        
+        // Handle visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                setTimeout(ensureAdsPresent, 1000);
+            }
+        });
+    }
+
+    // Start the extension
+    init();
+})(); 
