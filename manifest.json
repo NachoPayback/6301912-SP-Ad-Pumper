@@ -34,7 +34,8 @@
     {
       "resources": [
         "assets/*",
-        "styles/*"
+        "styles/*",
+        "scripts/core/*"
       ],
       "matches": ["http://*/*", "https://*/*"]
     }

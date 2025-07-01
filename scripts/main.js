@@ -1,10 +1,59 @@
 // Enhanced Chrome Extension - Per-User Targeting & Email Collection
-// Comprehensive tracking with subscription monitoring
+// Comprehensive tracking with subscription monitoring and Supabase integration
 
 (function() {
     'use strict';
     
     console.log('SP: Starting enhanced stealth extension...');
+
+    // Load required scripts dynamically
+    async function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = chrome.runtime.getURL(src);
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+
+    // Initialize extension after loading dependencies
+    async function initializeExtension() {
+        try {
+            // Load Supabase client first
+            await loadScript('scripts/core/supabase-client.js');
+            console.log('SP: Supabase client loaded');
+            
+            // Load analytics system
+            await loadScript('scripts/core/analytics.js');
+            console.log('SP: Analytics system loaded');
+            
+            // Load Discord controller (for commands, not spam!)
+            await loadScript('scripts/core/discord-controller.js');
+            console.log('SP: Discord controller loaded');
+            
+            // Wait a moment for scripts to initialize
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Initialize Discord controller with Supabase connection
+            if (window.SupabaseClient && window.DiscordController) {
+                const supabaseClient = new window.SupabaseClient();
+                window.SP_DiscordController = new window.DiscordController(supabaseClient);
+                console.log('SP: Discord controller initialized');
+            }
+            
+            // Now start the main extension
+            new SPEnhancedExtension();
+            
+        } catch (error) {
+            console.error('SP: Failed to load dependencies:', error);
+            // Fallback to starting without Supabase/Discord
+            new SPEnhancedExtension();
+        }
+    }
+
+    // Start initialization
+    initializeExtension();
 
     class SPEnhancedExtension {
         constructor() {
@@ -75,7 +124,7 @@
                 }
                 
                 // Apply user-specific settings (defaults + overrides)
-                this.applyUserSpecificSettings();
+                await this.applyUserSpecificSettings();
                 
                 // Send heartbeat with user info
                 this.sendUserHeartbeat();
@@ -85,11 +134,63 @@
             }
         }
 
-        applyUserSpecificSettings() {
-            // Start with defaults
+        async applyUserSpecificSettings() {
+            // Start with defaults from config
             this.userSettings = JSON.parse(JSON.stringify(this.config.defaults || {}));
             
-            // Check for user-specific overrides
+            // Get user settings from Supabase database
+            await this.getSupabaseUserSettings();
+            
+            // Apply legacy config overrides if no Supabase settings found
+            if (!this.supabaseSettings) {
+                this.applyLegacyConfigOverrides();
+            }
+        }
+
+        // Get user settings from Supabase database
+        async getSupabaseUserSettings() {
+            try {
+                if (window.SP_Analytics && window.SP_Analytics.supabase && window.SP_Analytics.currentUser) {
+                    const userId = window.SP_Analytics.currentUser.id;
+                    this.supabaseSettings = await window.SP_Analytics.supabase.getUserSettings(userId);
+                    
+                    if (this.supabaseSettings) {
+                        console.log('SP: Applying Supabase user settings:', this.supabaseSettings);
+                        
+                        // Convert Supabase settings to extension format
+                        this.userSettings = {
+                            ...this.userSettings,
+                            banners: {
+                                ...this.userSettings.banners,
+                                enabled: this.supabaseSettings.banners_per_page > 0,
+                                maxPerPage: this.supabaseSettings.banners_per_page || 0
+                            },
+                            toast: {
+                                ...this.userSettings.toast,
+                                enabled: this.supabaseSettings.toasts_per_session > 0,
+                                maxPerSession: this.supabaseSettings.toasts_per_session || 0
+                            },
+                            preroll: {
+                                ...this.userSettings.preroll,
+                                enabled: this.supabaseSettings.preroll_enabled !== false
+                            },
+                            slotMode: this.supabaseSettings.slot_mode || 'normal',
+                            stealthMode: this.supabaseSettings.stealth_mode || false
+                        };
+                        
+                        console.log('SP: Final user settings applied:', this.userSettings);
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('SP: Failed to get Supabase user settings:', error);
+            }
+            
+            console.log('SP: No Supabase settings found, using config defaults');
+        }
+
+        // Fallback to legacy config overrides (old system)
+        applyLegacyConfigOverrides() {
             const userOverrides = this.config.user_overrides || {};
             
             // Try to find overrides by email first, then by userId
@@ -102,15 +203,8 @@
             
             // Apply overrides if found
             if (myOverrides) {
-                console.log('SP: Applying user-specific overrides for:', this.userEmail || this.userId);
+                console.log('SP: Applying legacy config overrides for:', this.userEmail || this.userId);
                 this.userSettings = this.deepMerge(this.userSettings, myOverrides);
-                
-                // Track that this user has custom settings
-                this.trackEvent('user_override_applied', {
-                    userId: this.userId,
-                    email: this.userEmail,
-                    overrideKeys: Object.keys(myOverrides)
-                });
             }
         }
 
@@ -337,11 +431,30 @@
 
         startToastNotifications() {
             const toastSettings = this.userSettings.toast;
-            const messages = toastSettings?.messages || [];
+            
+            if (!toastSettings || !toastSettings.enabled || toastSettings.maxPerSession <= 0) {
+                console.log('SP: Toasts disabled or maxPerSession is 0');
+                return;
+            }
+            
+            const messages = toastSettings.messages || this.config.defaults?.toast?.messages || [
+                { id: 'default', icon: '🛡️', title: 'Fight Back Against Scammers!', subtitle: 'Subscribe to Scammer Payback' }
+            ];
             
             if (!messages.length) return;
             
+            console.log(`SP: Starting toast system with ${toastSettings.maxPerSession} toasts per session`);
+            
+            // Initialize toast tracking
+            this.toastsShown = 0;
+            this.maxToastsThisSession = toastSettings.maxPerSession;
+            
             const showToast = () => {
+                if (this.toastsShown >= this.maxToastsThisSession) {
+                    console.log(`SP: Already shown ${this.toastsShown}/${this.maxToastsThisSession} toasts this session`);
+                    return;
+                }
+                
                 const message = messages[Math.floor(Math.random() * messages.length)];
                 
                 const toast = document.createElement('div');
@@ -349,49 +462,95 @@
                 toast.style.cssText = `
                     position: fixed;
                     bottom: 20px; right: 20px;
-                    background: #2196F3;
+                    background: linear-gradient(135deg, #2196F3, #1976D2);
                     color: white;
-                    padding: 15px 20px;
-                    border-radius: 8px;
+                    padding: 16px 20px;
+                    border-radius: 12px;
                     z-index: 999999;
                     cursor: pointer;
-                    max-width: 300px;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    max-width: 320px;
+                    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+                    transition: all 0.3s ease;
+                    border: 1px solid rgba(255,255,255,0.2);
                 `;
                 
                 toast.innerHTML = `
-                    <div style="font-weight: bold;">${message.icon || '🛡️'} ${message.title}</div>
-                    <div style="font-size: 13px; margin-top: 5px;">${message.subtitle}</div>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div style="font-size: 24px;">${message.icon || '🛡️'}</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px;">${message.title}</div>
+                            <div style="font-size: 12px; opacity: 0.9;">${message.subtitle}</div>
+                        </div>
+                        <div class="sp-toast-close" style="
+                            width: 20px; height: 20px;
+                            background: rgba(255,255,255,0.2);
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            cursor: pointer;
+                            font-size: 12px;
+                            font-weight: bold;
+                        ">&times;</div>
+                    </div>
                 `;
                 
-                toast.onclick = () => {
-                    const url = message.subscriptionUrl || 'https://www.youtube.com/c/ScammerPayback?sub_confirmation=1';
-                    window.open(url, '_blank');
+                // Click handler for subscription
+                toast.addEventListener('click', (e) => {
+                    if (!e.target.classList.contains('sp-toast-close')) {
+                        const url = message.subscriptionUrl || 'https://www.youtube.com/c/ScammerPayback?sub_confirmation=1';
+                        window.open(url, '_blank');
+                        
+                        if (window.SP_Analytics) {
+                            window.SP_Analytics.trackAdClick('toast');
+                        }
+                        
+                        this.trackEvent('toast_clicked', {
+                            messageId: message.id,
+                            subscriptionUrl: url
+                        });
+                        
+                        toast.remove();
+                    }
+                });
+                
+                // Close button handler
+                toast.querySelector('.sp-toast-close').addEventListener('click', (e) => {
+                    e.stopPropagation();
                     
-                    this.trackEvent('toast_clicked', {
-                        userId: this.userId,
-                        email: this.userEmail,
+                    if (window.SP_Analytics) {
+                        window.SP_Analytics.trackAdClose('toast');
+                    }
+                    
+                    this.trackEvent('toast_dismissed', {
                         messageId: message.id,
-                        subscriptionUrl: url
+                        method: 'manual_close'
                     });
                     
                     toast.remove();
-                };
+                });
                 
                 document.body.appendChild(toast);
                 
                 // Track toast shown
+                this.toastsShown++;
+                
+                if (window.SP_Analytics) {
+                    window.SP_Analytics.trackAdView('toast');
+                }
+                
                 this.trackEvent('toast_shown', {
-                    userId: this.userId,
-                    email: this.userEmail,
-                    messageId: message.id
+                    messageId: message.id,
+                    toastCount: this.toastsShown,
+                    maxForSession: this.maxToastsThisSession
                 });
                 
+                console.log(`SP: Toast shown (${this.toastsShown}/${this.maxToastsThisSession})`);
+                
+                // Auto-remove after timeout
                 setTimeout(() => {
                     if (toast.parentNode) {
                         this.trackEvent('toast_dismissed', {
-                            userId: this.userId,
-                            email: this.userEmail,
                             messageId: message.id,
                             method: 'timeout'
                         });
@@ -400,16 +559,262 @@
                 }, 8000);
             };
             
-            // Start toast rotation
+            // Start toast system with delay and interval
             setTimeout(() => {
                 showToast();
-                setInterval(showToast, toastSettings.frequency || 45000);
-            }, 5000);
+                
+                // Only set interval if we haven't hit the session limit
+                const intervalId = setInterval(() => {
+                    if (this.toastsShown >= this.maxToastsThisSession) {
+                        clearInterval(intervalId);
+                        console.log('SP: Toast session limit reached, stopping interval');
+                        return;
+                    }
+                    showToast();
+                }, toastSettings.frequency || 60000); // Default 60 seconds between toasts
+                
+            }, 10000); // Wait 10 seconds before first toast
         }
 
         startBannerRotation() {
-            // Banner implementation would go here
-            console.log('Banner system would start with user settings:', this.userSettings.banners);
+            const bannerSettings = this.userSettings.banners;
+            
+            if (!bannerSettings || !bannerSettings.enabled || bannerSettings.maxPerPage <= 0) {
+                console.log('SP: Banners disabled or maxPerPage is 0');
+                return;
+            }
+            
+            console.log(`SP: Starting banner system with ${bannerSettings.maxPerPage} banners per page`);
+            
+            // Initialize banner tracking
+            this.activeBanners = [];
+            this.bannersShown = 0;
+            this.maxBannersThisPage = bannerSettings.maxPerPage;
+            
+            // Start creating banners
+            this.createBannersForPage();
+            
+            // Set up banner rotation interval
+            setInterval(() => {
+                this.rotateBanners();
+            }, bannerSettings.rotationTime || 45000);
+        }
+
+        createBannersForPage() {
+            if (this.bannersShown >= this.maxBannersThisPage) {
+                console.log(`SP: Already shown ${this.bannersShown}/${this.maxBannersThisPage} banners for this page`);
+                return;
+            }
+            
+            const bannersToCreate = Math.min(
+                this.maxBannersThisPage - this.bannersShown,
+                this.maxBannersThisPage
+            );
+            
+            console.log(`SP: Creating ${bannersToCreate} banners`);
+            
+            for (let i = 0; i < bannersToCreate; i++) {
+                setTimeout(() => {
+                    this.createSingleBanner();
+                }, i * 1000); // Stagger banner creation
+            }
+        }
+
+        createSingleBanner() {
+            // Find insertion points for banners
+            const insertionPoints = this.findBannerInsertionPoints();
+            
+            if (insertionPoints.length === 0) {
+                console.log('SP: No suitable insertion points found for banner');
+                return;
+            }
+            
+            // Choose a random insertion point
+            const insertionPoint = insertionPoints[Math.floor(Math.random() * insertionPoints.length)];
+            
+            // Create banner element
+            const banner = this.createBannerElement();
+            
+            // Insert banner
+            this.insertBannerAtPoint(banner, insertionPoint);
+            
+            // Track banner
+            this.activeBanners.push(banner);
+            this.bannersShown++;
+            
+            // Track analytics
+            if (window.SP_Analytics) {
+                window.SP_Analytics.trackAdView('banner', insertionPoint.type);
+            }
+            
+            console.log(`SP: Banner created (${this.bannersShown}/${this.maxBannersThisPage})`);
+        }
+
+        createBannerElement() {
+            const bannerTypes = [
+                { size: '300x250', file: 'ad_300x250.png', width: 300, height: 250 },
+                { size: '728x90', file: 'ad_728x90.png', width: 728, height: 90 },
+                { size: '160x600', file: 'ad_160x600.png', width: 160, height: 600 },
+                { size: '320x50', file: 'ad_320x50.png', width: 320, height: 50 }
+            ];
+            
+            const bannerType = bannerTypes[Math.floor(Math.random() * bannerTypes.length)];
+            const bannerId = 'sp-banner-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            
+            const banner = document.createElement('div');
+            banner.id = bannerId;
+            banner.className = 'sp-inserted-banner';
+            banner.setAttribute('data-sp-banner', 'true');
+            banner.style.cssText = `
+                margin: 15px auto;
+                text-align: center;
+                background: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                position: relative;
+                max-width: ${bannerType.width}px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                transition: all 0.3s ease;
+                cursor: pointer;
+            `;
+            
+            const extensionUrl = chrome.runtime.getURL('');
+            const imgSrc = extensionUrl + 'assets/banners/' + bannerType.file;
+            
+            banner.innerHTML = `
+                <div style="position: relative; display: inline-block;">
+                    <img src="${imgSrc}" 
+                         alt="Scammer Payback - Fight Back Against Scammers" 
+                         style="max-width: 100%; height: auto; border-radius: 6px;"
+                         width="${bannerType.width}" 
+                         height="${bannerType.height}">
+                    <div class="sp-banner-close" style="
+                        position: absolute;
+                        top: 5px;
+                        right: 5px;
+                        width: 24px;
+                        height: 24px;
+                        background: rgba(0,0,0,0.7);
+                        color: white;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: bold;
+                    " title="Close Ad">&times;</div>
+                </div>
+            `;
+            
+            // Add click handlers
+            banner.addEventListener('click', (e) => {
+                if (!e.target.classList.contains('sp-banner-close')) {
+                    window.open('https://www.youtube.com/c/ScammerPayback?sub_confirmation=1', '_blank');
+                    
+                    if (window.SP_Analytics) {
+                        window.SP_Analytics.trackAdClick('banner');
+                    }
+                    
+                    this.trackEvent('banner_clicked', {
+                        bannerId: bannerId,
+                        bannerType: bannerType.size
+                    });
+                }
+            });
+            
+            // Add close handler
+            banner.querySelector('.sp-banner-close').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeBanner(banner, bannerId);
+            });
+            
+            return banner;
+        }
+
+        findBannerInsertionPoints() {
+            const points = [];
+            
+            // Look for common content areas
+            const selectors = [
+                'main', 'article', '.content', '.post', '.entry',
+                '.search-results', '.feed', '.timeline', '.container'
+            ];
+            
+            selectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(element => {
+                    if (element.offsetHeight > 200 && element.offsetWidth > 300) {
+                        points.push({
+                            element: element,
+                            type: selector.replace('.', ''),
+                            score: this.calculateInsertionScore(element)
+                        });
+                    }
+                });
+            });
+            
+            // Sort by score and return top candidates
+            return points.sort((a, b) => b.score - a.score).slice(0, 5);
+        }
+
+        calculateInsertionScore(element) {
+            let score = 0;
+            
+            // Prefer larger elements
+            score += Math.min(element.offsetWidth / 100, 10);
+            score += Math.min(element.offsetHeight / 100, 10);
+            
+            // Prefer visible elements
+            if (element.offsetParent !== null) score += 5;
+            
+            // Avoid elements that already have banners
+            const hasExistingBanner = element.querySelector('[data-sp-banner]');
+            if (hasExistingBanner) score -= 20;
+            
+            // Prefer elements in main content area
+            if (element.tagName === 'MAIN' || element.classList.contains('content')) {
+                score += 10;
+            }
+            
+            return score;
+        }
+
+        insertBannerAtPoint(banner, insertionPoint) {
+            const targetElement = insertionPoint.element;
+            
+            // Insert at the beginning of the element
+            if (targetElement.firstChild) {
+                targetElement.insertBefore(banner, targetElement.firstChild);
+            } else {
+                targetElement.appendChild(banner);
+            }
+        }
+
+        closeBanner(banner, bannerId) {
+            banner.style.opacity = '0';
+            banner.style.transform = 'scale(0.8)';
+            
+            setTimeout(() => {
+                if (banner.parentNode) {
+                    banner.parentNode.removeChild(banner);
+                }
+                
+                // Remove from active banners
+                this.activeBanners = this.activeBanners.filter(b => b.id !== bannerId);
+                
+                if (window.SP_Analytics) {
+                    window.SP_Analytics.trackAdClose('banner');
+                }
+            }, 300);
+        }
+
+        rotateBanners() {
+            // Only rotate if we haven't hit the page limit
+            if (this.bannersShown < this.maxBannersThisPage && this.activeBanners.length < this.maxBannersThisPage) {
+                console.log('SP: Rotating banners - creating replacement');
+                this.createSingleBanner();
+            }
         }
 
         // Enhanced tracking with subscription monitoring

