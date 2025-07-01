@@ -7,85 +7,85 @@ class SupabaseClient {
         this.supabaseUrl = 'https://ahwfkfowqrjgatsbynds.supabase.co';
         this.supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFod2ZrZm93cXJqZ2F0c2J5bmRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzODg0MTAsImV4cCI6MjA2Njk2NDQxMH0.hRTJESyHmSIc7gUqROqkask8ZOHEqjNfzo0u-8GaIhQ';
         
-        this.client = null;
         this.currentUser = null;
         this.currentSession = null;
         
-        this.init();
+        console.log('✅ Supabase client initialized (fetch-based)');
     }
 
-    async init() {
+    // Direct API call to Supabase
+    async apiCall(endpoint, method = 'GET', data = null) {
+        const url = `${this.supabaseUrl}/rest/v1${endpoint}`;
+        const headers = {
+            'apikey': this.supabaseKey,
+            'Authorization': `Bearer ${this.supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        };
+
+        const options = { method, headers };
+        if (data && method !== 'GET') {
+            options.body = JSON.stringify(data);
+        }
+
         try {
-            // Load Supabase library if not already loaded
-            if (typeof window.supabase === 'undefined') {
-                await this.loadSupabaseLibrary();
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                throw new Error(`API call failed: ${response.status}`);
             }
             
-            this.client = window.supabase.createClient(this.supabaseUrl, this.supabaseKey);
-            console.log('✅ Connected to Supabase database');
+            const result = await response.json();
+            return { data: result, error: null };
             
         } catch (error) {
-            console.error('❌ Failed to initialize Supabase:', error);
+            console.error('❌ Supabase API call failed:', error);
+            return { data: null, error };
         }
-    }
-
-    async loadSupabaseLibrary() {
-        return new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://unpkg.com/@supabase/supabase-js@2';
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-        });
     }
 
     // Create or get user record
     async getOrCreateUser(email, browserInfo) {
-        if (!this.client) await this.init();
-        
         try {
             // Try to find existing user by email
-            let { data: existingUser, error } = await this.client
-                .from('users')
-                .select('*')
-                .eq('email', email)
-                .single();
+            const { data: existingUsers } = await this.apiCall(`/users?email=eq.${encodeURIComponent(email)}`);
 
-            if (existingUser) {
-                // Update last_seen and session count
-                const { data: updatedUser } = await this.client
-                    .from('users')
-                    .update({ 
-                        last_seen: new Date().toISOString(),
-                        total_sessions: existingUser.total_sessions + 1,
-                        browser_info: browserInfo
-                    })
-                    .eq('id', existingUser.id)
-                    .select()
-                    .single();
+            if (existingUsers && existingUsers.length > 0) {
+                const existingUser = existingUsers[0];
                 
-                this.currentUser = updatedUser || existingUser;
+                // Update last_seen and session count
+                const updateData = {
+                    last_seen: new Date().toISOString(),
+                    total_sessions: (existingUser.total_sessions || 0) + 1,
+                    browser_info: browserInfo
+                };
+                
+                const { data: updatedUsers } = await this.apiCall(
+                    `/users?id=eq.${existingUser.id}`, 
+                    'PATCH', 
+                    updateData
+                );
+                
+                this.currentUser = updatedUsers?.[0] || existingUser;
                 console.log('📱 Existing user found:', this.currentUser.email);
             } else {
                 // Create new user
-                const { data: newUser, error: createError } = await this.client
-                    .from('users')
-                    .insert({
-                        email: email,
-                        browser_info: browserInfo,
-                        location: await this.getUserLocation(),
-                        total_sessions: 1
-                    })
-                    .select()
-                    .single();
+                const newUserData = {
+                    email: email,
+                    browser_info: browserInfo,
+                    location: await this.getUserLocation(),
+                    total_sessions: 1,
+                    created_at: new Date().toISOString()
+                };
 
-                if (createError) throw createError;
+                const { data: newUsers } = await this.apiCall('/users', 'POST', newUserData);
                 
-                this.currentUser = newUser;
-                console.log('🆕 New user created:', this.currentUser.email);
-                
-                // Create default user settings
-                await this.createDefaultUserSettings(newUser.id);
+                if (newUsers && newUsers.length > 0) {
+                    this.currentUser = newUsers[0];
+                    console.log('🆕 New user created:', this.currentUser.email);
+                    
+                    // Create default user settings
+                    await this.createDefaultUserSettings(this.currentUser.id);
+                }
             }
             
             return this.currentUser;
@@ -98,17 +98,17 @@ class SupabaseClient {
 
     async createDefaultUserSettings(userId) {
         try {
-            await this.client
-                .from('user_settings')
-                .insert({
-                    user_id: userId,
-                    slot_mode: 'normal',
-                    banners_per_page: 2,
-                    toasts_per_session: 1,
-                    preroll_enabled: true,
-                    stealth_mode: false
-                });
+            const settingsData = {
+                user_id: userId,
+                slot_mode: 'normal',
+                banners_per_page: 2,
+                toasts_per_session: 1,
+                preroll_enabled: true,
+                stealth_mode: false,
+                created_at: new Date().toISOString()
+            };
             
+            await this.apiCall('/user_settings', 'POST', settingsData);
             console.log('⚙️ Default settings created for user');
         } catch (error) {
             console.error('❌ Error creating user settings:', error);
@@ -117,17 +117,9 @@ class SupabaseClient {
 
     // Get user-specific ad settings
     async getUserSettings(userId) {
-        if (!this.client) return null;
-        
         try {
-            const { data, error } = await this.client
-                .from('user_settings')
-                .select('*')
-                .eq('user_id', userId)
-                .single();
-
-            if (error) throw error;
-            return data;
+            const { data: settings } = await this.apiCall(`/user_settings?user_id=eq.${userId}`);
+            return settings && settings.length > 0 ? settings[0] : null;
             
         } catch (error) {
             console.error('❌ Error getting user settings:', error);
@@ -137,18 +129,13 @@ class SupabaseClient {
 
     // Update user settings (for per-user ad control)
     async updateUserSettings(userId, settings) {
-        if (!this.client) return false;
-        
         try {
-            const { error } = await this.client
-                .from('user_settings')
-                .update({
-                    ...settings,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('user_id', userId);
+            const updateData = {
+                ...settings,
+                updated_at: new Date().toISOString()
+            };
 
-            if (error) throw error;
+            await this.apiCall(`/user_settings?user_id=eq.${userId}`, 'PATCH', updateData);
             console.log('⚙️ User settings updated');
             return true;
             
@@ -160,25 +147,24 @@ class SupabaseClient {
 
     // Start new session
     async startSession(userId) {
-        if (!this.client || !userId) return;
+        if (!userId) return;
         
         try {
-            const { data, error } = await this.client
-                .from('user_sessions')
-                .insert({
-                    user_id: userId,
-                    session_start: new Date().toISOString(),
-                    pages_visited: 1,
-                    sites_visited: [window.location.hostname]
-                })
-                .select()
-                .single();
+            const sessionData = {
+                user_id: userId,
+                session_start: new Date().toISOString(),
+                pages_visited: 1,
+                sites_visited: [window.location.hostname],
+                created_at: new Date().toISOString()
+            };
 
-            if (error) throw error;
+            const { data: sessions } = await this.apiCall('/user_sessions', 'POST', sessionData);
             
-            this.currentSession = data;
-            console.log('🚀 Session started:', this.currentSession.id);
-            return this.currentSession;
+            if (sessions && sessions.length > 0) {
+                this.currentSession = sessions[0];
+                console.log('🚀 Session started:', this.currentSession.id);
+                return this.currentSession;
+            }
             
         } catch (error) {
             console.error('❌ Error starting session:', error);
@@ -187,21 +173,21 @@ class SupabaseClient {
 
     // Track ad interaction
     async trackAdInteraction(adType, interactionType, adPosition = null) {
-        if (!this.client || !this.currentUser || !this.currentSession) return;
+        if (!this.currentUser || !this.currentSession) return;
         
         try {
-            await this.client
-                .from('ad_interactions')
-                .insert({
-                    user_id: this.currentUser.id,
-                    session_id: this.currentSession.id,
-                    ad_type: adType,
-                    ad_position: adPosition,
-                    interaction_type: interactionType,
-                    site_domain: window.location.hostname,
-                    page_url: window.location.href
-                });
+            const interactionData = {
+                user_id: this.currentUser.id,
+                session_id: this.currentSession.id,
+                ad_type: adType,
+                ad_position: adPosition,
+                interaction_type: interactionType,
+                site_domain: window.location.hostname,
+                page_url: window.location.href,
+                timestamp: new Date().toISOString()
+            };
 
+            await this.apiCall('/ad_interactions', 'POST', interactionData);
             console.log(`📊 Tracked ${adType} ${interactionType} on ${window.location.hostname}`);
             
         } catch (error) {
@@ -227,24 +213,29 @@ class SupabaseClient {
 
     // Get active users (for dashboard)
     async getActiveUsers(hours = 24) {
-        if (!this.client) return [];
-        
         try {
             const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
             
-            const { data, error } = await this.client
-                .from('users')
-                .select(`
-                    *,
-                    user_settings (*),
-                    user_sessions!inner (session_start, session_end, pages_visited),
-                    ad_interactions (ad_type, interaction_type)
-                `)
-                .gte('last_seen', since)
-                .order('last_seen', { ascending: false });
-
-            if (error) throw error;
-            return data;
+            const { data: users } = await this.apiCall(`/users?last_seen=gte.${since}&order=last_seen.desc`);
+            
+            // Get additional data for each user
+            if (users && users.length > 0) {
+                for (let user of users) {
+                    // Get user settings
+                    const { data: settings } = await this.apiCall(`/user_settings?user_id=eq.${user.id}`);
+                    user.user_settings = settings || [];
+                    
+                    // Get recent sessions
+                    const { data: sessions } = await this.apiCall(`/user_sessions?user_id=eq.${user.id}&session_start=gte.${since}&order=session_start.desc`);
+                    user.user_sessions = sessions || [];
+                    
+                    // Get ad interactions
+                    const { data: interactions } = await this.apiCall(`/ad_interactions?user_id=eq.${user.id}&timestamp=gte.${since}`);
+                    user.ad_interactions = interactions || [];
+                }
+            }
+            
+            return users || [];
             
         } catch (error) {
             console.error('❌ Error getting active users:', error);
@@ -254,22 +245,15 @@ class SupabaseClient {
 
     // Get ad interaction stats
     async getAdStats(userId = null, days = 7) {
-        if (!this.client) return {};
-        
         try {
             const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
             
-            let query = this.client
-                .from('ad_interactions')
-                .select('ad_type, interaction_type, timestamp')
-                .gte('timestamp', since);
-                
+            let endpoint = `/ad_interactions?timestamp=gte.${since}&select=ad_type,interaction_type,timestamp`;
             if (userId) {
-                query = query.eq('user_id', userId);
+                endpoint += `&user_id=eq.${userId}`;
             }
             
-            const { data, error } = await query;
-            if (error) throw error;
+            const { data } = await this.apiCall(endpoint);
             
             // Process stats
             const stats = {
@@ -279,19 +263,21 @@ class SupabaseClient {
                 by_day: {}
             };
             
-            data.forEach(interaction => {
-                if (interaction.interaction_type === 'view') stats.total_views++;
-                if (interaction.interaction_type === 'click') stats.total_clicks++;
-                
-                if (!stats.by_ad_type[interaction.ad_type]) {
-                    stats.by_ad_type[interaction.ad_type] = { views: 0, clicks: 0 };
-                }
-                stats.by_ad_type[interaction.ad_type][interaction.interaction_type + 's']++;
-                
-                const day = interaction.timestamp.split('T')[0];
-                if (!stats.by_day[day]) stats.by_day[day] = 0;
-                stats.by_day[day]++;
-            });
+            if (data) {
+                data.forEach(interaction => {
+                    if (interaction.interaction_type === 'view') stats.total_views++;
+                    if (interaction.interaction_type === 'click') stats.total_clicks++;
+                    
+                    if (!stats.by_ad_type[interaction.ad_type]) {
+                        stats.by_ad_type[interaction.ad_type] = { views: 0, clicks: 0 };
+                    }
+                    stats.by_ad_type[interaction.ad_type][interaction.interaction_type + 's']++;
+                    
+                    const day = interaction.timestamp.split('T')[0];
+                    if (!stats.by_day[day]) stats.by_day[day] = 0;
+                    stats.by_day[day]++;
+                });
+            }
             
             return stats;
             
