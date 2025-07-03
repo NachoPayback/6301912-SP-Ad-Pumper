@@ -1,14 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Enhanced Browsing Assistant",
-  "version": "3.0.0",
-  "description": "Browser enhancement utilities for improved web experience",
+  "name": "Simple Ad Extension",
+  "version": "1.0.0",
+  "description": "Simple local ad insertion extension",
   "permissions": [
     "activeTab",
-    "storage",
-    "scripting",
-    "identity",
-    "identity.email"
+    "storage"
   ],
   "host_permissions": [
     "http://*/*",
@@ -17,9 +14,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": [
-        "scripts/main.js"
-      ],
+      "js": ["scripts/main.js"],
       "css": ["styles/styles.css"],
       "run_at": "document_end"
     }
@@ -35,10 +30,7 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/*",
-        "styles/*",
-        "scripts/core/*",
-        "config.json"
+        "assets/*"
       ],
       "matches": ["http://*/*", "https://*/*"]
     }
